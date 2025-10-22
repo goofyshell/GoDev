@@ -71,4 +71,91 @@ program
     });
   });
 
+// Add these commands to godev.js
+program
+  .command('templates')
+  .description('Manage project templates')
+  .action(async () => {
+    const templatesCog = new TemplatesCog(config);
+    const templates = await templatesCog.getAllTemplates();
+    
+    console.log(chalk.blue.bold('\n📋 Available Templates:\n'));
+    
+    console.log(chalk.green('Built-in Templates:'));
+    templates.filter(t => t.type === 'built-in').forEach(template => {
+      console.log(`  ${template.value.padEnd(15)} - ${template.name}`);
+    });
+    
+    console.log(chalk.cyan('\nCustom Templates:'));
+    templates.filter(t => t.type === 'custom').forEach(template => {
+      console.log(`  ${template.value.padEnd(15)} - ${template.name}`);
+    });
+    
+    console.log(chalk.yellow('\n💡 Use: godev template --help for template management'));
+  });
+
+// In godev.js - simplified template commands
+program
+  .command('templates')
+  .description('List all available templates')
+  .action(async () => {
+    const templatesCog = new TemplatesCog();
+    const templates = await templatesCog.listTemplates();
+    
+    if (templates.length === 0) {
+      console.log(chalk.yellow('No templates found.'));
+      console.log(chalk.blue('\n💡 Create your first template: godev template create'));
+      return;
+    }
+    
+    console.log(chalk.blue.bold('\n📋 Available Templates:\n'));
+    templates.forEach(template => {
+      console.log(`  ${chalk.green(template.name.padEnd(20))} ${chalk.cyan('(' + template.language + ')')}`);
+      console.log(`  ${chalk.gray('└─ ' + template.description)}`);
+      console.log();
+    });
+  });
+
+program
+  .command('template')
+  .description('Manage custom templates')
+  .addCommand(new Command('create')
+    .description('Create a new template')
+    .action(async () => {
+      const templatesCog = new TemplatesCog();
+      await templatesCog.createTemplate();
+    }))
+  .addCommand(new Command('list')
+    .description('List all templates')
+    .action(async () => {
+      const templatesCog = new TemplatesCog();
+      const templates = await templatesCog.listTemplates();
+      
+      if (templates.length === 0) {
+        console.log(chalk.yellow('No templates found.'));
+        return;
+      }
+      
+      console.log(chalk.blue.bold('\n📋 Templates:\n'));
+      templates.forEach(template => {
+        console.log(`  ${chalk.green(template.name)}`);
+        console.log(`    Language: ${chalk.cyan(template.language)}`);
+        console.log(`    Description: ${template.description}`);
+        console.log(`    Created: ${template.created}`);
+        console.log();
+      });
+    }))
+  .addCommand(new Command('delete')
+    .description('Delete a template')
+    .action(async () => {
+      const templatesCog = new TemplatesCog();
+      await templatesCog.deleteTemplate();
+    }))
+  .addCommand(new Command('edit')
+    .description('Edit a template')
+    .action(async () => {
+      const templatesCog = new TemplatesCog();
+      await templatesCog.editTemplate();
+    }));
+
 program.parse();
