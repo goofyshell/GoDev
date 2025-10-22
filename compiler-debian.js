@@ -24,27 +24,32 @@ export class DebianCompiler {
   }
 
   async compileProject(projectPath = '.') {
-    console.log(chalk.blue.bold('\n🔨 GoDev Debian Compiler\n'));
+    console.log(chalk.blue.bold('\n🔨 GoDev Smart Compiler\n'));
 
     try {
+      const absoluteProjectPath = path.resolve(projectPath);
+      
       // Detect project type
-      const projectType = await this.detectProjectType(projectPath);
+      const projectType = await this.detectProjectType(absoluteProjectPath);
       
       if (!projectType) {
         console.log(chalk.yellow('❓ Could not detect project type'));
+        console.log(chalk.gray('Make sure you have project files in the directory'));
         return;
       }
 
       console.log(chalk.green(`📦 Detected: ${projectType} project`));
+      console.log(chalk.gray(`📁 Project path: ${absoluteProjectPath}`));
 
       // Check and install dependencies
       await this.ensureDependencies(projectType);
 
       // Create build directory
-      await fs.ensureDir(this.buildDir);
+      const projectBuildDir = path.join(absoluteProjectPath, this.buildDir);
+      await fs.ensureDir(projectBuildDir);
 
       // Compile based on project type
-      const result = await this.compile(projectType, projectPath);
+      const result = await this.compile(projectType, absoluteProjectPath, projectBuildDir);
 
       if (result.success) {
         console.log(chalk.green.bold('\n✅ Compilation successful!'));
@@ -63,30 +68,89 @@ export class DebianCompiler {
   }
 
   async detectProjectType(projectPath) {
+    // First, check for project configuration files (highest priority)
     const files = await fs.readdir(projectPath);
 
     // Check for specific project files
-    if (files.includes('Cargo.toml')) return 'rust';
-    if (files.includes('go.mod')) return 'go';
-    if (files.includes('package.json')) return 'nodejs';
-    if (files.includes('requirements.txt')) return 'python';
+    if (await this.findFileRecursive(projectPath, 'Cargo.toml')) return 'rust';
+    if (await this.findFileRecursive(projectPath, 'go.mod')) return 'go';
+    if (await this.findFileRecursive(projectPath, 'package.json')) return 'nodejs';
+    if (await this.findFileRecursive(projectPath, 'requirements.txt')) return 'python';
     
-    // Check source files
-    const sourceFile = files.find(file => {
-      const ext = path.extname(file);
-      return Object.values(this.supportedLanguages).some(lang => 
-        lang.extension === ext
-      );
-    });
-
-    if (sourceFile) {
-      const ext = path.extname(sourceFile);
+    // Check for source files recursively
+    const sourceFiles = await this.findFilesRecursive(projectPath, Object.values(this.supportedLanguages).map(lang => lang.extension));
+    
+    if (sourceFiles.length > 0) {
+      const ext = path.extname(sourceFiles[0]);
       return Object.keys(this.supportedLanguages).find(lang => 
         this.supportedLanguages[lang].extension === ext
       );
     }
 
     return null;
+  }
+
+  async findFileRecursive(dir, fileName) {
+    try {
+      const files = await fs.readdir(dir);
+      
+      // Check current directory
+      if (files.includes(fileName)) {
+        return path.join(dir, fileName);
+      }
+      
+      // Recursively check subdirectories
+      for (const file of files) {
+        const fullPath = path.join(dir, file);
+        const stat = await fs.stat(fullPath);
+        
+        if (stat.isDirectory() && !file.startsWith('.') && file !== 'node_modules' && file !== 'build') {
+          const found = await this.findFileRecursive(fullPath, fileName);
+          if (found) return found;
+        }
+      }
+    } catch (error) {
+      // Directory might not be readable, skip it
+    }
+    
+    return null;
+  }
+
+  async findFilesRecursive(dir, extensions) {
+    const files = [];
+    
+    async function scanDirectory(currentDir) {
+      try {
+        const items = await fs.readdir(currentDir);
+        
+        for (const item of items) {
+          const fullPath = path.join(currentDir, item);
+          
+          try {
+            const stat = await fs.stat(fullPath);
+            
+            if (stat.isDirectory()) {
+              // Skip hidden directories, node_modules, and build directories
+              if (!item.startsWith('.') && item !== 'node_modules' && item !== 'build') {
+                await scanDirectory(fullPath);
+              }
+            } else if (stat.isFile()) {
+              const ext = path.extname(item).toLowerCase();
+              if (extensions.includes(ext)) {
+                files.push(fullPath);
+              }
+            }
+          } catch (error) {
+            // Skip files we can't access
+          }
+        }
+      } catch (error) {
+        // Skip directories we can't read
+      }
+    }
+    
+    await scanDirectory(dir);
+    return files;
   }
 
   async ensureDependencies(language) {
@@ -140,26 +204,25 @@ export class DebianCompiler {
     });
   }
 
-  async compile(language, projectPath) {
+  async compile(language, projectPath, buildDir) {
     const langConfig = this.supportedLanguages[language];
-    const absoluteProjectPath = path.resolve(projectPath);
-    const outputName = this.getOutputName(language, absoluteProjectPath);
-    const outputPath = path.join(this.buildDir, outputName);
+    const outputName = this.getOutputName(language, projectPath);
+    const outputPath = path.join(buildDir, outputName);
 
     try {
       switch (language) {
         case 'c':
-          return await this.compileC(absoluteProjectPath, outputPath);
+          return await this.compileC(projectPath, outputPath);
         case 'cpp':
-          return await this.compileCpp(absoluteProjectPath, outputPath);
+          return await this.compileCpp(projectPath, outputPath);
         case 'go':
-          return await this.compileGo(absoluteProjectPath, outputPath);
+          return await this.compileGo(projectPath, outputPath);
         case 'rust':
-          return await this.compileRust(absoluteProjectPath, outputPath);
+          return await this.compileRust(projectPath, outputPath);
         case 'nodejs':
-          return await this.prepareNode(absoluteProjectPath);
+          return await this.prepareNode(projectPath);
         case 'python':
-          return await this.preparePython(absoluteProjectPath);
+          return await this.preparePython(projectPath);
         default:
           throw new Error(`Unsupported language: ${language}`);
       }
@@ -169,17 +232,21 @@ export class DebianCompiler {
   }
 
   async compileC(projectPath, outputPath) {
-    // Find all .c files
-    const files = await this.findFiles(projectPath, '.c');
+    // Find all .c files recursively
+    const files = await this.findFilesRecursive(projectPath, ['.c']);
     
     if (files.length === 0) {
-      throw new Error('No .c files found');
+      throw new Error('No .c files found in project directory');
     }
+
+    console.log(chalk.blue(`🔍 Found ${files.length} C source files`));
 
     // Ensure build directory exists
     await fs.ensureDir(path.dirname(outputPath));
 
-    const command = `gcc ${files.map(f => `"${f}"`).join(' ')} -o "${outputPath}" -Wall -Wextra`;
+    const includeDirs = this.getIncludeDirectories(projectPath, files);
+    const command = `gcc ${files.map(f => `"${f}"`).join(' ')} ${includeDirs} -o "${outputPath}" -Wall -Wextra`;
+    
     console.log(chalk.blue(`🔨 Compiling: ${command}`));
     
     await execAsync(command);
@@ -191,33 +258,50 @@ export class DebianCompiler {
   }
 
   async compileCpp(projectPath, outputPath) {
-    const files = await this.findFiles(projectPath, '.cpp');
+    const files = await this.findFilesRecursive(projectPath, ['.cpp', '.cc', '.cxx']);
     
     if (files.length === 0) {
-      throw new Error('No .cpp files found');
+      throw new Error('No C++ files found in project directory');
     }
 
-    // Ensure build directory exists
+    console.log(chalk.blue(`🔍 Found ${files.length} C++ source files`));
+
     await fs.ensureDir(path.dirname(outputPath));
 
-    const command = `g++ ${files.map(f => `"${f}"`).join(' ')} -o "${outputPath}" -Wall -Wextra -std=c++17`;
+    const includeDirs = this.getIncludeDirectories(projectPath, files);
+    const command = `g++ ${files.map(f => `"${f}"`).join(' ')} ${includeDirs} -o "${outputPath}" -Wall -Wextra -std=c++17`;
+    
     console.log(chalk.blue(`🔨 Compiling: ${command}`));
     
     await execAsync(command);
 
-    // Make executable
     await fs.chmod(outputPath, 0o755);
 
     return { success: true, output: outputPath, executable: outputPath };
   }
 
+  getIncludeDirectories(projectPath, files) {
+    const uniqueDirs = new Set();
+    
+    // Add project root
+    uniqueDirs.add(projectPath);
+    
+    // Add directories containing source files
+    files.forEach(file => {
+      uniqueDirs.add(path.dirname(file));
+    });
+
+    // Convert to include flags
+    return Array.from(uniqueDirs)
+      .map(dir => `-I"${dir}"`)
+      .join(' ');
+  }
+
   async compileGo(projectPath, outputPath) {
-    // Ensure build directory exists
     await fs.ensureDir(path.dirname(outputPath));
 
     await execAsync(`go build -o "${outputPath}"`, { cwd: projectPath });
     
-    // Make executable
     await fs.chmod(outputPath, 0o755);
 
     return { success: true, output: outputPath, executable: outputPath };
@@ -229,17 +313,20 @@ export class DebianCompiler {
     // Rust outputs to target/release/
     const cargoOutput = path.join(projectPath, 'target/release', path.basename(projectPath));
     
-    // Ensure build directory exists
     await fs.ensureDir(path.dirname(outputPath));
     
     if (await fs.pathExists(cargoOutput)) {
       await fs.copy(cargoOutput, outputPath);
     } else {
-      // Fallback: try to find the binary
-      const rustBinaries = await this.findFiles(path.join(projectPath, 'target/release'), '');
+      // Fallback: find any binary in target/release
+      const rustBinaries = await this.findFilesRecursive(path.join(projectPath, 'target/release'), ['']);
       const executable = rustBinaries.find(f => {
-        const stat = fs.statSync(f);
-        return stat.isFile() && (stat.mode & fs.constants.X_OK);
+        try {
+          const stat = fs.statSync(f);
+          return stat.isFile() && (stat.mode & fs.constants.X_OK);
+        } catch {
+          return false;
+        }
       });
       
       if (executable) {
@@ -249,7 +336,6 @@ export class DebianCompiler {
       }
     }
 
-    // Make executable
     await fs.chmod(outputPath, 0o755);
 
     return { success: true, output: outputPath, executable: outputPath };
@@ -257,9 +343,10 @@ export class DebianCompiler {
 
   async prepareNode(projectPath) {
     // Install npm dependencies if package.json exists
-    if (await fs.pathExists(path.join(projectPath, 'package.json'))) {
+    const packageJson = await this.findFileRecursive(projectPath, 'package.json');
+    if (packageJson) {
       console.log(chalk.blue('📦 Installing npm dependencies...'));
-      await execAsync('npm install', { cwd: projectPath });
+      await execAsync('npm install', { cwd: path.dirname(packageJson) });
     }
 
     const mainFile = await this.findMainFile(projectPath, '.js');
@@ -273,9 +360,10 @@ export class DebianCompiler {
 
   async preparePython(projectPath) {
     // Install pip dependencies if requirements.txt exists
-    if (await fs.pathExists(path.join(projectPath, 'requirements.txt'))) {
+    const requirementsFile = await this.findFileRecursive(projectPath, 'requirements.txt');
+    if (requirementsFile) {
       console.log(chalk.blue('📦 Installing Python dependencies...'));
-      await execAsync('pip3 install -r requirements.txt', { cwd: projectPath });
+      await execAsync('pip3 install -r requirements.txt', { cwd: path.dirname(requirementsFile) });
     }
 
     const mainFile = await this.findMainFile(projectPath, '.py');
@@ -287,31 +375,26 @@ export class DebianCompiler {
     };
   }
 
-  async findFiles(projectPath, extension) {
-    try {
-      const files = await fs.readdir(projectPath);
-      return files
-        .filter(file => file.endsWith(extension))
-        .map(file => path.join(projectPath, file));
-    } catch (error) {
-      return [];
-    }
-  }
-
   async findMainFile(projectPath, extension) {
-    const files = await this.findFiles(projectPath, extension);
+    const files = await this.findFilesRecursive(projectPath, [extension]);
     
     if (files.length === 0) {
       throw new Error(`No ${extension} files found`);
     }
     
-    // Look for common main file names
-    const mainFiles = files.filter(file => {
-      const baseName = path.basename(file).toLowerCase();
-      return baseName.includes('main') || baseName.includes('index') || baseName.includes('app');
-    });
+    // Look for common main file names (prioritized)
+    const priorityNames = ['main', 'index', 'app', 'server'];
+    
+    for (const name of priorityNames) {
+      const mainFile = files.find(file => {
+        const baseName = path.basename(file).toLowerCase();
+        return baseName.includes(name);
+      });
+      if (mainFile) return mainFile;
+    }
 
-    return mainFiles[0] || files[0];
+    // Return first file if no main file found
+    return files[0];
   }
 
   getOutputName(language, projectPath) {
@@ -332,7 +415,6 @@ export class DebianCompiler {
   async offerToRun(result, language) {
     try {
       if (result.runtime) {
-        // For interpreted languages
         const { run } = await inquirer.prompt([{
           type: 'confirm',
           name: 'run',
@@ -356,7 +438,6 @@ export class DebianCompiler {
           });
         }
       } else {
-        // For compiled languages
         const { run } = await inquirer.prompt([{
           type: 'confirm',
           name: 'run',
@@ -367,16 +448,13 @@ export class DebianCompiler {
         if (run) {
           console.log(chalk.blue('\n🚀 Running program...\n'));
           
-          // Verify the executable exists
           if (!await fs.pathExists(result.executable)) {
             throw new Error(`Executable not found: ${result.executable}`);
           }
 
-          // Get relative path for display
           const relativePath = path.relative(process.cwd(), result.executable);
           console.log(chalk.gray(`$ ./${relativePath}`));
           
-          // Use spawn with the absolute path
           const child = spawn(result.executable, [], {
             stdio: 'inherit',
             shell: false
@@ -398,19 +476,20 @@ export class DebianCompiler {
     }
   }
 
-  // Utility method to clean build directory
-  async clean() {
-    if (await fs.pathExists(this.buildDir)) {
-      await fs.remove(this.buildDir);
-      console.log(chalk.green('🧹 Build directory cleaned'));
+  async clean(projectPath = '.') {
+    const absolutePath = path.resolve(projectPath);
+    const buildDir = path.join(absolutePath, this.buildDir);
+    
+    if (await fs.pathExists(buildDir)) {
+      await fs.remove(buildDir);
+      console.log(chalk.green(`🧹 Build directory cleaned: ${buildDir}`));
     } else {
-      console.log(chalk.yellow('📁 Build directory does not exist'));
+      console.log(chalk.yellow(`📁 Build directory does not exist: ${buildDir}`));
     }
   }
 
-  // Method to show system info
   async showSystemInfo() {
-    console.log(chalk.blue.bold('\n💻 Debian System Information\n'));
+    console.log(chalk.blue.bold('\n💻 System Compiler Information\n'));
     
     try {
       const [osInfo, gccVersion, goVersion, nodeVersion, pythonVersion, rustVersion] = await Promise.all([
@@ -431,26 +510,5 @@ export class DebianCompiler {
     } catch (error) {
       console.log(chalk.red('Error getting system info:'), error.message);
     }
-  }
-}
-
-// If running directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const compiler = new DebianCompiler();
-  const command = process.argv[2] || 'build';
-  const projectPath = process.argv[3] || '.';
-
-  switch (command) {
-    case 'build':
-      await compiler.compileProject(projectPath);
-      break;
-    case 'clean':
-      await compiler.clean();
-      break;
-    case 'info':
-      await compiler.showSystemInfo();
-      break;
-    default:
-      console.log('Usage: node compiler-debian.js [build|clean|info] [project-path]');
   }
 }
