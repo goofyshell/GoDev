@@ -12,7 +12,7 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # Configuration
-REPO_URL="https://github.com/schoobertt/godev.git"
+REPO_URL="https://github.com/shcoobertt/godev.git"
 INSTALL_DIR="$HOME/.godev"
 BIN_DIR="$HOME/.local/bin"
 VERSION="1.0.0"
