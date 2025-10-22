@@ -168,11 +168,39 @@ export class DebianCompiler {
         }
       }
 
-      // Check for C/C++ build systems
+      // Check for C/C++ build systems - IMPROVED DETECTION
+      const makefile = await this.findFileRecursive(projectPath, 'Makefile') || 
+                      await this.findFileRecursive(projectPath, 'makefile');
+      
+      if (makefile) {
+        // Read Makefile content to determine language
+        const makefileContent = await fs.readFile(makefile, 'utf8').catch(() => '');
+        
+        // Check what source files actually exist
+        const hasCFiles = (await this.findFilesRecursive(projectPath, ['.c'])).length > 0;
+        const hasCppFiles = (await this.findFilesRecursive(projectPath, ['.cpp', '.cc', '.cxx'])).length > 0;
+        
+        if (hasCppFiles && !hasCFiles) {
+          console.log(chalk.gray(`📋 Found build system: Makefile (C++)`));
+          return 'cpp';
+        } else if (hasCFiles && !hasCppFiles) {
+          console.log(chalk.gray(`📋 Found build system: Makefile (C)`));
+          return 'c';
+        } else if (hasCFiles && hasCppFiles) {
+          // If both exist, prefer C++ if Makefile suggests it
+          if (makefileContent.includes('g++') || makefileContent.includes('.cpp')) {
+            console.log(chalk.gray(`📋 Found build system: Makefile (C++)`));
+            return 'cpp';
+          } else {
+            console.log(chalk.gray(`📋 Found build system: Makefile (C)`));
+            return 'c';
+          }
+        }
+      }
+
+      // Check other build systems
       const buildFiles = {
         'CMakeLists.txt': 'cpp',
-        'Makefile': 'c',
-        'makefile': 'c',
         'configure': 'c',
         'autogen.sh': 'c'
       };
@@ -222,9 +250,8 @@ export class DebianCompiler {
           const hasCFiles = (await this.findFilesRecursive(dirPath, ['.c'])).length > 0;
           const hasCppFiles = (await this.findFilesRecursive(dirPath, ['.cpp', '.cc', '.cxx'])).length > 0;
           
-          if (hasCFiles || hasCppFiles) {
-            return hasCppFiles ? 'cpp' : 'c';
-          }
+          if (hasCppFiles) return 'cpp';
+          if (hasCFiles) return 'c';
         }
       }
 
@@ -399,26 +426,67 @@ export class DebianCompiler {
 
   async compileC(projectPath, outputPath) {
     // Check for Makefile first
-    const makefile = await this.findFileRecursive(projectPath, 'Makefile');
+    const makefile = await this.findFileRecursive(projectPath, 'Makefile') || 
+                    await this.findFileRecursive(projectPath, 'makefile');
+    
     if (makefile) {
       console.log(chalk.blue('🔨 Using Makefile for C project'));
-      await execAsync('make', { cwd: path.dirname(makefile) });
-      
-      // Look for the built executable
-      const builtFiles = await this.findFilesRecursive(projectPath, ['']);
-      const executable = builtFiles.find(f => {
-        try {
-          const stat = fs.statSync(f);
-          return stat.isFile() && (stat.mode & fs.constants.X_OK);
-        } catch {
-          return false;
+      try {
+        await execAsync('make', { cwd: path.dirname(makefile) });
+        
+        // Look for the built executable in common locations
+        const possibleDirs = ['.', 'build', 'bin', 'out', 'dist'];
+        let executable = null;
+        
+        for (const dir of possibleDirs) {
+          const searchPath = path.join(path.dirname(makefile), dir);
+          if (await fs.pathExists(searchPath)) {
+            const files = await fs.readdir(searchPath).catch(() => []);
+            const execFile = files.find(file => {
+              const fullPath = path.join(searchPath, file);
+              try {
+                const stat = fs.statSync(fullPath);
+                return stat.isFile() && (stat.mode & fs.constants.X_OK);
+              } catch {
+                return false;
+              }
+            });
+            
+            if (execFile) {
+              executable = path.join(searchPath, execFile);
+              break;
+            }
+          }
         }
-      });
-      
-      if (executable) {
-        await fs.ensureDir(path.dirname(outputPath));
-        await fs.copy(executable, outputPath);
-        return { success: true, output: outputPath, executable: outputPath };
+        
+        // Also check for any executable in project root
+        if (!executable) {
+          const rootFiles = await fs.readdir(path.dirname(makefile)).catch(() => []);
+          const execFile = rootFiles.find(file => {
+            const fullPath = path.join(path.dirname(makefile), file);
+            try {
+              const stat = fs.statSync(fullPath);
+              return stat.isFile() && (stat.mode & fs.constants.X_OK) && !file.includes('.');
+            } catch {
+              return false;
+            }
+          });
+          
+          if (execFile) {
+            executable = path.join(path.dirname(makefile), execFile);
+          }
+        }
+        
+        if (executable) {
+          await fs.ensureDir(path.dirname(outputPath));
+          await fs.copy(executable, outputPath);
+          console.log(chalk.green(`📦 Built executable: ${path.basename(executable)}`));
+          return { success: true, output: outputPath, executable: outputPath };
+        } else {
+          console.log(chalk.yellow('⚠️  Make succeeded but no executable found, falling back to direct compilation'));
+        }
+      } catch (makeError) {
+        console.log(chalk.yellow('⚠️  Make failed, falling back to direct compilation'));
       }
     }
 
@@ -449,26 +517,67 @@ export class DebianCompiler {
 
   async compileCpp(projectPath, outputPath) {
     // Check for Makefile first
-    const makefile = await this.findFileRecursive(projectPath, 'Makefile');
+    const makefile = await this.findFileRecursive(projectPath, 'Makefile') || 
+                    await this.findFileRecursive(projectPath, 'makefile');
+    
     if (makefile) {
       console.log(chalk.blue('🔨 Using Makefile for C++ project'));
-      await execAsync('make', { cwd: path.dirname(makefile) });
-      
-      // Look for the built executable
-      const builtFiles = await this.findFilesRecursive(projectPath, ['']);
-      const executable = builtFiles.find(f => {
-        try {
-          const stat = fs.statSync(f);
-          return stat.isFile() && (stat.mode & fs.constants.X_OK);
-        } catch {
-          return false;
+      try {
+        await execAsync('make', { cwd: path.dirname(makefile) });
+        
+        // Look for the built executable in common locations
+        const possibleDirs = ['.', 'build', 'bin', 'out', 'dist'];
+        let executable = null;
+        
+        for (const dir of possibleDirs) {
+          const searchPath = path.join(path.dirname(makefile), dir);
+          if (await fs.pathExists(searchPath)) {
+            const files = await fs.readdir(searchPath).catch(() => []);
+            const execFile = files.find(file => {
+              const fullPath = path.join(searchPath, file);
+              try {
+                const stat = fs.statSync(fullPath);
+                return stat.isFile() && (stat.mode & fs.constants.X_OK);
+              } catch {
+                return false;
+              }
+            });
+            
+            if (execFile) {
+              executable = path.join(searchPath, execFile);
+              break;
+            }
+          }
         }
-      });
-      
-      if (executable) {
-        await fs.ensureDir(path.dirname(outputPath));
-        await fs.copy(executable, outputPath);
-        return { success: true, output: outputPath, executable: outputPath };
+        
+        // Also check for any executable in project root
+        if (!executable) {
+          const rootFiles = await fs.readdir(path.dirname(makefile)).catch(() => []);
+          const execFile = rootFiles.find(file => {
+            const fullPath = path.join(path.dirname(makefile), file);
+            try {
+              const stat = fs.statSync(fullPath);
+              return stat.isFile() && (stat.mode & fs.constants.X_OK) && !file.includes('.');
+            } catch {
+              return false;
+            }
+          });
+          
+          if (execFile) {
+            executable = path.join(path.dirname(makefile), execFile);
+          }
+        }
+        
+        if (executable) {
+          await fs.ensureDir(path.dirname(outputPath));
+          await fs.copy(executable, outputPath);
+          console.log(chalk.green(`📦 Built executable: ${path.basename(executable)}`));
+          return { success: true, output: outputPath, executable: outputPath };
+        } else {
+          console.log(chalk.yellow('⚠️  Make succeeded but no executable found, falling back to direct compilation'));
+        }
+      } catch (makeError) {
+        console.log(chalk.yellow('⚠️  Make failed, falling back to direct compilation'));
       }
     }
 
@@ -865,6 +974,18 @@ export class DebianCompiler {
       if (await fs.pathExists(dirPath)) {
         await fs.remove(dirPath);
         console.log(chalk.green(`🧹 Cleaned: ${dir}`));
+      }
+    }
+
+    // Clean Makefile builds
+    const makefile = await this.findFileRecursive(absolutePath, 'Makefile') || 
+                    await this.findFileRecursive(absolutePath, 'makefile');
+    if (makefile) {
+      try {
+        await execAsync('make clean', { cwd: path.dirname(makefile) });
+        console.log(chalk.green('🧹 Make clean completed'));
+      } catch {
+        // Ignore if make clean fails
       }
     }
   }
