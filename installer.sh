@@ -20,11 +20,11 @@ VERSION="1.0.0"
 # UI Functions
 print_banner() {
     echo -e "${PURPLE}"
-    echo "   ██████  ██████  ██████  ███████ ██    ██"
-    echo "  ██      ██    ██ ██   ██ ██      ██    ██"
-    echo "  ██      ██    ██ ██   ██ █████   ██    ██"
-    echo "  ██      ██    ██ ██   ██ ██       ██  ██"
-    echo "   ██████  ██████  ██████  ███████   ████"
+    echo "   ██████   ██████  ██████  ███████ ██    ██"
+    echo "  ██       ██    ██ ██   ██ ██      ██    ██"
+    echo "  ██   ███ ██    ██ ██   ██ █████   ██    ██"
+    echo "  ██    ██ ██    ██ ██   ██ ██       ██  ██"
+    echo "   ██████   ██████  ██████  ███████   ████"
     echo -e "${NC}"
     echo -e "${CYAN}           Universal Project Generator${NC}"
     echo -e "${YELLOW}    One command to rule all projects${NC}"
@@ -47,10 +47,8 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 ensure_path() {
     print_step "Configuring PATH..."
     
-    # Add to PATH for current session
     export PATH="$BIN_DIR:$PATH"
     
-    # Detect current shell
     local current_shell=$(basename "$SHELL")
     local config_file=""
     
@@ -60,7 +58,6 @@ ensure_path() {
         *) config_file="$HOME/.bashrc" ;;
     esac
     
-    # Add to config file if not already there
     if [ -n "$config_file" ] && ! grep -q "\.local/bin" "$config_file" 2>/dev/null; then
         echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$config_file"
         print_substep "Added to $config_file"
@@ -68,7 +65,6 @@ ensure_path() {
         print_substep "PATH already configured in $config_file"
     fi
     
-    # Add to other common config files as backup
     for file in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
         if [ -f "$file" ] && ! grep -q "\.local/bin" "$file" 2>/dev/null; then
             echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$file"
@@ -159,7 +155,6 @@ create_symlinks() {
 verify_installation() {
     print_step "Verifying installation..."
     
-    # Small delay for PATH to update
     sleep 1
     
     if command_exists godev && command_exists godev-compile; then
@@ -212,9 +207,9 @@ show_restart_required() {
     echo
 }
 
+# Install function
 install_godev() {
     print_banner
-    
     print_step "Starting GoDev installation v$VERSION"
     print_divider
     
@@ -240,5 +235,105 @@ install_godev() {
     fi
 }
 
-# Main execution
-install_godev
+# Update function
+update_godev() {
+    print_banner
+    print_step "Updating GoDev to latest version"
+    print_divider
+    
+    if [ ! -d "$INSTALL_DIR" ]; then
+        print_error "GoDev is not installed. Please install first."
+        echo
+        echo "Run: curl -fsSL https://raw.githubusercontent.com/goofyshell/godev/main/installer.sh | bash"
+        exit 1
+    fi
+    
+    print_step "Updating repository..."
+    cd "$INSTALL_DIR"
+    git pull origin main
+    print_substep "Repository updated"
+    print_divider
+    
+    print_step "Updating dependencies..."
+    npm install --silent
+    print_substep "Dependencies updated"
+    print_divider
+    
+    print_success "GoDev updated successfully!"
+    echo
+    echo -e "${YELLOW}🔄 If commands don't work immediately:${NC}"
+    echo -e "  ${GREEN}source ~/.zshrc${NC} or restart your terminal"
+    echo
+}
+
+# Uninstall function
+uninstall_godev() {
+    print_banner
+    print_step "Uninstalling GoDev"
+    print_divider
+    
+    print_step "Removing commands..."
+    rm -f "$BIN_DIR/godev" "$BIN_DIR/godev-compile"
+    print_substep "Commands removed"
+    print_divider
+    
+    print_step "Removing installation files..."
+    if [ -d "$INSTALL_DIR" ]; then
+        rm -rf "$INSTALL_DIR"
+        print_substep "GoDev files removed"
+    else
+        print_substep "No installation files found"
+    fi
+    print_divider
+    
+    print_success "GoDev uninstalled successfully!"
+    echo
+    echo -e "${YELLOW}🗑️  All GoDev files have been removed${NC}"
+    echo
+}
+
+# Show help
+show_help() {
+    print_banner
+    echo -e "${CYAN}GoDev Installer v$VERSION${NC}"
+    echo
+    echo -e "${YELLOW}Usage:${NC}"
+    echo "  curl -fsSL https://raw.githubusercontent.com/goofyshell/godev/main/installer.sh | bash"
+    echo "  curl -fsSL ... | bash -s install    (default)"
+    echo "  curl -fsSL ... | bash -s update"
+    echo "  curl -fsSL ... | bash -s uninstall"
+    echo
+    echo -e "${YELLOW}Examples:${NC}"
+    echo "  Install:   curl -fsSL ... | bash"
+    echo "  Update:    curl -fsSL ... | bash -s update"
+    echo "  Uninstall: curl -fsSL ... | bash -s uninstall"
+    echo
+}
+
+# Main function
+main() {
+    local command=${1:-install}
+    
+    case $command in
+        install)
+            install_godev
+            ;;
+        update)
+            update_godev
+            ;;
+        uninstall)
+            uninstall_godev
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        *)
+            print_error "Unknown command: $command"
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# Run main function
+main "$@"
