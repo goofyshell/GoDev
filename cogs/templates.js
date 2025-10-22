@@ -1,384 +1,362 @@
 import fs from 'fs-extra';
 import path from 'path';
 import chalk from 'chalk';
+import inquirer from 'inquirer';
 
 export class TemplatesCog {
-  constructor(config) {
-    this.config = config;
+  constructor() {
+    this.customTemplatesDir = path.join(process.cwd(), '.godev-templates');
   }
 
   async generateTemplate(projectData, templateType) {
-    const template = this.config.templates[templateType];
+    // Remove the 'custom:' prefix if present
+    const templateName = templateType.replace('custom:', '');
+    const templatePath = path.join(this.customTemplatesDir, templateName);
+    
+    if (!await fs.pathExists(templatePath)) {
+      throw new Error(`Template '${templateName}' not found in ${this.customTemplatesDir}`);
+    }
+
     const projectPath = path.join(process.cwd(), projectData.projectName);
-
-    // Create project directory
     await fs.ensureDir(projectPath);
-    console.log(chalk.green(`📁 Created project directory: ${projectPath}`));
 
-    // Generate files based on template
-    for (const file of template.files) {
-      await this.generateFile(file, projectData, template, projectPath);
-    }
-
-    // Generate language-specific configuration files
-    await this.generateLanguageConfig(projectData, templateType, projectPath);
-
-    console.log(chalk.green('✅ Template generated successfully!'));
+    console.log(chalk.green(`📁 Using template: ${templateName}`));
+    
+    // Copy template files with variable substitution
+    await this.copyTemplateWithVariables(templatePath, projectPath, projectData);
+    
+    console.log(chalk.green('✅ Project generated successfully!'));
   }
 
-  async generateFile(fileName, projectData, template, projectPath) {
-    const filePath = path.join(projectPath, fileName);
-    const dirName = path.dirname(filePath);
+  async copyTemplateWithVariables(srcPath, destPath, projectData) {
+    const files = await fs.readdir(srcPath);
     
-    await fs.ensureDir(dirName);
+    for (const file of files) {
+      // Skip template configuration files
+      if (file === 'template.json' || file === '.godev-template') {
+        continue;
+      }
 
-    let content = '';
-    
-    switch (fileName) {
-      case 'package.json':
-        content = await this.generatePackageJsonContent(projectData, template);
-        break;
-      case 'README.md':
-        content = this.generateReadmeContent(projectData, template);
-        break;
-      case 'src/index.js':
-        content = this.generateNodeIndex(projectData);
-        break;
-      case 'src/App.jsx':
-        content = this.generateReactApp(projectData);
-        break;
-      case 'main.go':
-        content = this.generateGoMain(projectData);
-        break;
-      case 'src/main.py':
-        content = this.generatePythonMain(projectData);
-        break;
-      case 'src/main.rs':
-        content = this.generateRustMain(projectData);
-        break;
-      case 'src/main.c':
-        content = this.generateCMain(projectData);
-        break;
-      case 'src/main.cpp':
-        content = this.generateCppMain(projectData);
-        break;
-      case 'Dockerfile':
-        content = this.generateDockerfile(projectData, template);
-        break;
-      case '.gitignore':
-        content = this.generateGitignore(template);
-        break;
-      case '.env.example':
-        content = this.generateEnvExample();
-        break;
-      case 'docker-compose.yml':
-        content = this.generateDockerCompose(projectData);
-        break;
-      default:
-        content = await this.generateDefaultFile(fileName, projectData, template);
-    }
+      const srcFile = path.join(srcPath, file);
+      const destFile = path.join(destPath, file);
+      const stat = await fs.stat(srcFile);
 
-    await fs.writeFile(filePath, content);
-    console.log(chalk.blue(`📄 Created: ${fileName}`));
-  }
-
-  async generateLanguageConfig(projectData, templateType, projectPath) {
-    switch (templateType) {
-      case 'nodejs':
-      case 'react':
-        await this.generatePackageJson(projectData, this.config.templates[templateType], projectPath);
-        break;
-      case 'python':
-        await this.generatePythonConfig(projectData, projectPath);
-        break;
-      case 'go':
-        await this.generateGoConfig(projectData, projectPath);
-        break;
-      case 'rust':
-        await this.generateRustConfig(projectData, projectPath);
-        break;
-      case 'c':
-        await this.generateCConfig(projectData, projectPath);
-        break;
-      case 'cpp':
-        await this.generateCppConfig(projectData, projectPath);
-        break;
+      if (stat.isDirectory()) {
+        await fs.ensureDir(destFile);
+        await this.copyTemplateWithVariables(srcFile, destFile, projectData);
+      } else {
+        await this.processTemplateFile(srcFile, destFile, projectData);
+      }
     }
   }
 
-  // Node.js/React Package.json
-  async generatePackageJson(projectData, template, projectPath) {
-    const content = this.generatePackageJsonContent(projectData, template);
-    await fs.writeFile(path.join(projectPath, 'package.json'), content);
-  }
-
-  generatePackageJsonContent(projectData, template) {
-    return JSON.stringify({
-      name: projectData.projectName,
-      version: "1.0.0",
-      description: projectData.description,
-      main: template.type === 'react' ? "src/main.jsx" : "src/index.js",
-      type: "module",
-      scripts: template.scripts || {},
-      dependencies: template.dependencies?.reduce((acc, dep) => {
-        acc[dep] = "latest";
-        return acc;
-      }, {}) || {},
-      devDependencies: template.devDependencies?.reduce((acc, dep) => {
-        acc[dep] = "latest";
-        return acc;
-      }, {}) || {},
-      keywords: template.keywords || [],
-      author: projectData.author || "Developer",
-      license: "MIT"
-    }, null, 2);
-  }
-
-  // Python Configuration
-  async generatePythonConfig(projectData, projectPath) {
-    const requirementsContent = this.generateRequirements(projectData);
-    await fs.writeFile(path.join(projectPath, 'requirements.txt'), requirementsContent);
+  async processTemplateFile(srcFile, destFile, projectData) {
+    let content = await fs.readFile(srcFile, 'utf8');
     
-    const pyprojectContent = this.generatePyproject(projectData);
-    await fs.writeFile(path.join(projectPath, 'pyproject.toml'), pyprojectContent);
-  }
-
-  generateRequirements(projectData) {
-    return `# ${projectData.projectName} Dependencies
-fastapi==0.104.1
-uvicorn==0.24.0
-pydantic==2.5.0
-python-multipart==0.0.6
-`;
-  }
-
-  generatePyproject(projectData) {
-    return `[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "${projectData.projectName.replace(/\s+/g, '-').toLowerCase()}"
-version = "1.0.0"
-description = "${projectData.description}"
-authors = [
-    { name = "${projectData.author || "Developer"}" },
-]
-dependencies = [
-    "fastapi>=0.104.1",
-    "uvicorn>=0.24.0",
-]
-`;
-  }
-
-  // Go Configuration
-  async generateGoConfig(projectData, projectPath) {
-    const goModContent = this.generateGoMod(projectData);
-    await fs.writeFile(path.join(projectPath, 'go.mod'), goModContent);
-  }
-
-  generateGoMod(projectData) {
-    const moduleName = projectData.projectName.replace(/\s+/g, '-').toLowerCase();
-    return `module ${moduleName}
-
-go 1.21
-
-require (
-    github.com/gorilla/mux v1.8.0
-    github.com/rs/cors v1.10.0
-)
-`;
-  }
-
-  // Rust Configuration
-  async generateRustConfig(projectData, projectPath) {
-    const cargoContent = this.generateCargoToml(projectData);
-    await fs.writeFile(path.join(projectPath, 'Cargo.toml'), cargoContent);
-  }
-
-  generateCargoToml(projectData) {
-    const packageName = projectData.projectName.replace(/\s+/g, '-').toLowerCase();
-    return `[package]
-name = "${packageName}"
-version = "1.0.0"
-edition = "2021"
-description = "${projectData.description}"
-authors = ["${projectData.author || "Developer"}"]
-
-[dependencies]
-actix-web = "4.0"
-serde = { version = "1.0", features = ["derive"] }
-tokio = { version = "1.0", features = ["full"] }
-`;
-  }
-
-  // C Configuration
-  async generateCConfig(projectData, projectPath) {
-    const makefileContent = this.generateCMakefile(projectData);
-    await fs.writeFile(path.join(projectPath, 'Makefile'), makefileContent);
+    // Replace template variables
+    content = this.replaceTemplateVariables(content, projectData);
     
-    const headerContent = this.generateCHeader(projectData);
-    await fs.writeFile(path.join(projectPath, 'include', 'app.h'), headerContent);
+    await fs.ensureDir(path.dirname(destFile));
+    await fs.writeFile(destFile, content);
+    console.log(chalk.blue(`📄 Created: ${path.relative(process.cwd(), destFile)}`));
   }
 
-  generateCMakefile(projectData) {
-    return `# ${projectData.projectName} Makefile
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c99 -I./include
-SRC = $(wildcard src/*.c)
-OBJ = $(SRC:.c=.o)
-TARGET = build/${projectData.projectName}
+  replaceTemplateVariables(content, projectData) {
+    const variables = {
+      '{{PROJECT_NAME}}': projectData.projectName,
+      '{{PROJECT_DESCRIPTION}}': projectData.description || '',
+      '{{PROJECT_AUTHOR}}': projectData.author || 'Developer',
+      '{{PROJECT_VERSION}}': '1.0.0',
+      '{{YEAR}}': new Date().getFullYear().toString(),
+      '{{DATE}}': new Date().toISOString().split('T')[0],
+      '{{TIMESTAMP}}': new Date().toISOString(),
+      '{{PROJECT_NAME_SNAKE}}': projectData.projectName.replace(/\s+/g, '_').toLowerCase(),
+      '{{PROJECT_NAME_KEBAB}}': projectData.projectName.replace(/\s+/g, '-').toLowerCase(),
+      '{{PROJECT_NAME_PASCAL}}': projectData.projectName.replace(/\s+/g, '')
+                                                         .replace(/(?:^\w|[A-Z]|\b\w)/g, (word, index) => 
+                                                           index === 0 ? word.toUpperCase() : word.toLowerCase())
+                                                         .replace(/\s+/g, '')
+    };
 
-$(TARGET): $(OBJ)
-\t@mkdir -p build
-\t$(CC) -o $@ $^ -lm
+    let processedContent = content;
+    for (const [variable, value] of Object.entries(variables)) {
+      processedContent = processedContent.replace(new RegExp(variable, 'g'), value);
+    }
 
-%.o: %.c
-\t$(CC) $(CFLAGS) -c $< -o $@
-
-clean:
-\trm -f $(OBJ) $(TARGET)
-
-.PHONY: clean
-`;
+    return processedContent;
   }
 
-  // C++ Configuration
-  async generateCppConfig(projectData, projectPath) {
-    const makefileContent = this.generateCppMakefile(projectData);
-    await fs.writeFile(path.join(projectPath, 'Makefile'), makefileContent);
+  // Template Management
+  async createTemplate() {
+    console.log(chalk.blue.bold('\n🎨 Create New Template\n'));
+
+    const answers = await inquirer.prompt([
+      {
+        type: 'input',
+        name: 'templateName',
+        message: 'Template name:',
+        validate: input => input ? true : 'Template name is required'
+      },
+      {
+        type: 'input',
+        name: 'description',
+        message: 'Template description:',
+        default: 'A custom project template'
+      },
+      {
+        type: 'list',
+        name: 'language',
+        message: 'Primary language/framework:',
+        choices: [
+          'nodejs', 'react', 'python', 'go', 'rust', 'c', 'cpp', 'html', 'other'
+        ]
+      }
+    ]);
+
+    const templatePath = path.join(this.customTemplatesDir, answers.templateName);
     
-    const headerContent = this.generateCppHeader(projectData);
-    await fs.writeFile(path.join(projectPath, 'include', 'App.hpp'), headerContent);
+    if (await fs.pathExists(templatePath)) {
+      const { overwrite } = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'overwrite',
+        message: `Template '${answers.templateName}' already exists. Overwrite?`,
+        default: false
+      }]);
+
+      if (!overwrite) {
+        console.log(chalk.yellow('Template creation cancelled.'));
+        return;
+      }
+    }
+
+    await fs.ensureDir(templatePath);
+
+    // Create template configuration
+    const templateConfig = {
+      name: answers.templateName,
+      description: answers.description,
+      language: answers.language,
+      version: '1.0.0',
+      created: new Date().toISOString(),
+      variables: [
+        'PROJECT_NAME',
+        'PROJECT_DESCRIPTION', 
+        'PROJECT_AUTHOR',
+        'YEAR',
+        'DATE'
+      ]
+    };
+
+    await fs.writeJson(path.join(templatePath, 'template.json'), templateConfig, { spaces: 2 });
+
+    // Create basic template structure based on language
+    await this.createLanguageTemplate(answers.language, templatePath);
+
+    console.log(chalk.green(`\n✅ Template '${answers.templateName}' created!`));
+    console.log(chalk.blue(`📁 Location: ${templatePath}`));
+    console.log(chalk.yellow('\n💡 Template Variables:'));
+    console.log('  {{PROJECT_NAME}}        - Project name');
+    console.log('  {{PROJECT_DESCRIPTION}} - Project description');
+    console.log('  {{PROJECT_AUTHOR}}      - Author name');
+    console.log('  {{YEAR}}                - Current year');
+    console.log('  {{DATE}}                - Current date');
+    console.log('  {{PROJECT_NAME_SNAKE}}  - snake_case version');
+    console.log('  {{PROJECT_NAME_KEBAB}}  - kebab-case version');
+    console.log('  {{PROJECT_NAME_PASCAL}} - PascalCase version');
+    console.log(chalk.cyan('\n🚀 Usage: godev create --template ' + answers.templateName));
   }
 
-  generateCppMakefile(projectData) {
-    return `# ${projectData.projectName} Makefile
-CXX = g++
-CXXFLAGS = -Wall -Wextra -std=c++17 -I./include
-SRC = $(wildcard src/*.cpp)
-OBJ = $(SRC:.cpp=.o)
-TARGET = build/${projectData.projectName}
+  async createLanguageTemplate(language, templatePath) {
+    const templateCreators = {
+      'nodejs': this.createNodeJSTemplate,
+      'react': this.createReactTemplate,
+      'python': this.createPythonTemplate,
+      'go': this.createGoTemplate,
+      'rust': this.createRustTemplate,
+      'c': this.createCTemplate,
+      'cpp': this.createCppTemplate,
+      'html': this.createHtmlTemplate,
+      'other': this.createBasicTemplate
+    };
 
-$(TARGET): $(OBJ)
-\t@mkdir -p build
-\t$(CXX) -o $@ $^
-
-%.o: %.cpp
-\t$(CXX) $(CXXFLAGS) -c $< -o $@
-
-clean:
-\trm -f $(OBJ) $(TARGET)
-
-.PHONY: clean
-`;
+    if (templateCreators[language]) {
+      await templateCreators[language].call(this, templatePath);
+    } else {
+      await this.createBasicTemplate(templatePath);
+    }
   }
 
-  // File Content Generators
-  generateReadmeContent(projectData, template) {
-    return `# ${projectData.projectName}
+  async createNodeJSTemplate(templatePath) {
+    const files = {
+      'package.json': `{
+  "name": "{{PROJECT_NAME_KEBAB}}",
+  "version": "1.0.0",
+  "description": "{{PROJECT_DESCRIPTION}}",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "node --test"
+  },
+  "keywords": [],
+  "author": "{{PROJECT_AUTHOR}}",
+  "license": "MIT"
+}`,
+      'src/index.js': `// {{PROJECT_NAME}}
+// {{PROJECT_DESCRIPTION}}
 
-${projectData.description}
+import { createServer } from 'http';
 
-## Created with GoDev
+const server = createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
+    message: 'Hello from {{PROJECT_NAME}}!',
+    timestamp: new Date().toISOString()
+  }));
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log('🚀 {{PROJECT_NAME}} running on port', PORT);
+});`,
+      'README.md': `# {{PROJECT_NAME}}
+
+{{PROJECT_DESCRIPTION}}
 
 ## Getting Started
 
-\`\`\`bash
-cd ${projectData.projectName}
-${this.getSetupCommands(template.type)}
-\`\`\`
+\\\`\\\`\\\`bash
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+
+# Run tests
+npm test
+\\\`\\\`\\\`
 
 ## Project Structure
 
-\`\`\`
-${projectData.projectName}/
-├── src/           # Source files
-├── include/       # Header files (C/C++)
-├── build/         # Build output
-└── README.md      # This file
-\`\`\`
+\\\`\\\`\\\`
+{{PROJECT_NAME}}/
+├── src/
+│   └── index.js
+├── package.json
+└── README.md
+\\\`\\\`\\\`
 
-## Template: ${template.name}
-`;
-  }
-
-  getSetupCommands(templateType) {
-    const commands = {
-      'nodejs': 'npm install && npm run dev',
-      'react': 'npm install && npm run dev',
-      'python': 'pip install -r requirements.txt && python src/main.py',
-      'go': 'go run main.go',
-      'rust': 'cargo run',
-      'c': 'make && ./build/app',
-      'cpp': 'make && ./build/app'
+Created by {{PROJECT_AUTHOR}} in {{YEAR}}
+`
     };
-    return commands[templateType] || 'npm install && npm run dev';
+
+    await this.createTemplateFiles(templatePath, files);
   }
 
-  generateNodeIndex(projectData) {
-    return `import express from 'express';
+  async createReactTemplate(templatePath) {
+    const files = {
+      'package.json': `{
+  "name": "{{PROJECT_NAME_KEBAB}}",
+  "version": "1.0.0", 
+  "description": "{{PROJECT_DESCRIPTION}}",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "vite": "^4.4.0",
+    "@vitejs/plugin-react": "^4.0.0"
+  },
+  "author": "{{PROJECT_AUTHOR}}",
+  "license": "MIT"
+}`,
+      'vite.config.js': `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.use(express.json());
-
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Hello from ${projectData.projectName}!',
-    timestamp: new Date().toISOString()
-  });
-});
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', service: '${projectData.projectName}' });
-});
-
-app.listen(PORT, () => {
-  console.log('🚀 Server running on port', PORT);
-});
-`;
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 3000
   }
+})`,
+      'index.html': `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{{PROJECT_NAME}}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>`,
+      'src/main.jsx': `import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
 
-  generateReactApp(projectData) {
-    return `import React, { useState } from 'react';
-import './App.css';
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)`,
+      'src/App.jsx': `import { useState } from 'react'
+import './App.css'
 
 function App() {
-  const [count, setCount] = useState(0);
+  const [count, setCount] = useState(0)
 
   return (
     <div className="App">
-      <header className="App-header">
-        <h1>Welcome to ${projectData.projectName}</h1>
-        <p>Count: {count}</p>
-        <button onClick={() => setCount(count + 1)}>
-          Increment
+      <h1>{{PROJECT_NAME}}</h1>
+      <p>{{PROJECT_DESCRIPTION}}</p>
+      <div className="card">
+        <button onClick={() => setCount((count) => count + 1)}>
+          Count is {count}
         </button>
-      </header>
+      </div>
     </div>
-  );
+  )
 }
 
-export default App;
-`;
+export default App`
+    };
+
+    await this.createTemplateFiles(templatePath, files);
   }
 
-  generatePythonMain(projectData) {
-    return `#!/usr/bin/env python3
-"""
-${projectData.projectName}
-${projectData.description}
-"""
+  async createPythonTemplate(templatePath) {
+    const files = {
+      'requirements.txt': `# {{PROJECT_NAME}}
+# Dependencies for {{PROJECT_DESCRIPTION}}
 
-import os
+fastapi==0.104.1
+uvicorn==0.24.0`,
+      'src/main.py': `\"\"\"
+{{PROJECT_NAME}}
+{{PROJECT_DESCRIPTION}}
+
+Author: {{PROJECT_AUTHOR}}
+Created: {{YEAR}}
+\"\"\"
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="${projectData.projectName}")
+app = FastAPI(
+    title="{{PROJECT_NAME}}",
+    description="{{PROJECT_DESCRIPTION}}",
+    version="1.0.0"
+)
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -390,325 +368,179 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {
-        "message": "Hello from ${projectData.projectName}!",
-        "status": "running"
+        "message": "Welcome to {{PROJECT_NAME}}!",
+        "service": "{{PROJECT_NAME}}",
+        "timestamp": "{{TIMESTAMP}}"
     }
 
 @app.get("/health")
-async def health_check():
+async def health():
     return {"status": "healthy"}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-`;
-  }
+    uvicorn.run(app, host="0.0.0.0", port=8000)`,
+      'README.md': `# {{PROJECT_NAME}}
 
-  generateGoMain(projectData) {
-    return `package main
+{{PROJECT_DESCRIPTION}}
 
-import (
-    "encoding/json"
-    "fmt"
-    "log"
-    "net/http"
-    "time"
-    
-    "github.com/gorilla/mux"
-    "github.com/rs/cors"
-)
+## Development
 
-type HealthResponse struct {
-    Status    string \`json:"status"\`
-    Service   string \`json:"service"\`
-    Timestamp string \`json:"timestamp"\`
-}
+\\\`\\\`\\\`bash
+# Install dependencies
+pip install -r requirements.txt
 
-func main() {
-    r := mux.NewRouter()
-    
-    // CORS middleware
-    handler := cors.New(cors.Options{
-        AllowedOrigins: []string{"*"},
-        AllowedMethods: []string{"GET", "POST", "PUT", "DELETE"},
-    }).Handler(r)
-    
-    r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        json.NewEncoder(w).Encode(map[string]string{
-            "message": "Hello from ${projectData.projectName}!",
-        })
-    })
-    
-    r.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-        json.NewEncoder(w).Encode(HealthResponse{
-            Status:    "healthy",
-            Service:   "${projectData.projectName}",
-            Timestamp: time.Now().Format(time.RFC3339),
-        })
-    })
-    
-    fmt.Println("🚀 Server starting on :8080")
-    log.Fatal(http.ListenAndServe(":8080", handler))
-}
-`;
-  }
+# Run the application
+python src/main.py
+\\\`\\\`\\\`
 
-  generateRustMain(projectData) {
-    return `use actix_web::{web, App, HttpServer, Responder};
-use serde::Serialize;
-use std::time::SystemTime;
+The API will be available at http://localhost:8000
 
-#[derive(Serialize)]
-struct HealthResponse {
-    status: String,
-    service: String,
-    timestamp: String,
-}
-
-async fn hello() -> impl Responder {
-    web::Json(serde_json::json!({
-        "message": "Hello from ${projectData.projectName}!"
-    }))
-}
-
-async fn health() -> impl Responder {
-    web::Json(HealthResponse {
-        status: "healthy".to_string(),
-        service: "${projectData.projectName}".to_string(),
-        timestamp: SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            .to_string(),
-    })
-}
-
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    println!("🚀 Starting ${projectData.projectName} on :8080");
-    
-    HttpServer::new(|| {
-        App::new()
-            .route("/", web::get().to(hello))
-            .route("/health", web::get().to(health))
-    })
-    .bind("0.0.0.0:8080")?
-    .run()
-    .await
-}
-`;
-  }
-
-  generateCMain(projectData) {
-    return `#include <stdio.h>
-#include <stdlib.h>
-#include "app.h"
-
-int main(int argc, char** argv) {
-    printf("🚀 Welcome to ${projectData.projectName}!\\n");
-    
-    // Example functionality
-    int result = calculate_something(42);
-    printf("Calculation result: %d\\n", result);
-    
-    return 0;
-}
-
-int calculate_something(int input) {
-    return input * 2;
-}
-`;
-  }
-
-  generateCppMain(projectData) {
-    return `#include <iostream>
-#include <string>
-#include "App.hpp"
-
-int main(int argc, char** argv) {
-    std::cout << "🚀 Welcome to ${projectData.projectName}!" << std::endl;
-    
-    App app;
-    app.run();
-    
-    return 0;
-}
-
-void App::run() {
-    std::cout << "App is running..." << std::endl;
-    // Add your application logic here
-}
-`;
-  }
-
-  generateCHeader(projectData) {
-    return `#ifndef ${projectData.projectName.replace(/\s+/g, '_').toUpperCase()}_H
-#define ${projectData.projectName.replace(/\s+/g, '_').toUpperCase()}_H
-
-int calculate_something(int input);
-
-#endif
-`;
-  }
-
-  generateCppHeader(projectData) {
-    return `#ifndef ${projectData.projectName.replace(/\s+/g, '_').toUpperCase()}_HPP
-#define ${projectData.projectName.replace(/\s+/g, '_').toUpperCase()}_HPP
-
-class App {
-public:
-    void run();
-};
-
-#endif
-`;
-  }
-
-  generateDockerfile(projectData, template) {
-    const baseImages = {
-      'nodejs': 'node:18-alpine',
-      'react': 'node:18-alpine', 
-      'python': 'python:3.11-alpine',
-      'go': 'golang:1.21-alpine',
-      'rust': 'rust:1.70-alpine',
-      'c': 'gcc:latest',
-      'cpp': 'gcc:latest'
+Created by {{PROJECT_AUTHOR}} • {{YEAR}}
+`
     };
 
-    return `FROM ${baseImages[template.type]}
-
-WORKDIR /app
-
-COPY . .
-
-${this.getDockerCommands(template.type)}
-
-EXPOSE 3000
-
-CMD ${this.getDockerCmd(template.type)}
-`;
+    await this.createTemplateFiles(templatePath, files);
   }
 
-  getDockerCommands(templateType) {
-    const commands = {
-      'nodejs': 'RUN npm install && npm run build',
-      'react': 'RUN npm install && npm run build',
-      'python': 'RUN pip install -r requirements.txt',
-      'go': 'RUN go build -o app .',
-      'rust': 'RUN cargo build --release',
-      'c': 'RUN make',
-      'cpp': 'RUN make'
+  async createBasicTemplate(templatePath) {
+    const files = {
+      'README.md': `# {{PROJECT_NAME}}
+
+{{PROJECT_DESCRIPTION}}
+
+## Project Structure
+
+This is a basic template. Add your own files and structure as needed.
+
+## Template Variables
+
+This template uses the following variables:
+- {{PROJECT_NAME}} - {{PROJECT_NAME}}
+- {{PROJECT_DESCRIPTION}} - {{PROJECT_DESCRIPTION}} 
+- {{PROJECT_AUTHOR}} - {{PROJECT_AUTHOR}}
+- {{YEAR}} - {{YEAR}}
+
+Created with GoDev Templates
+`,
+      'src/main.txt': `Welcome to {{PROJECT_NAME}}!
+
+This is a custom template. Edit the files in the template directory to customize this template for your needs.
+
+Project: {{PROJECT_NAME}}
+Description: {{PROJECT_DESCRIPTION}}
+Author: {{PROJECT_AUTHOR}}
+Year: {{YEAR}}
+`
     };
-    return commands[templateType] || 'RUN echo "No build steps"';
+
+    await this.createTemplateFiles(templatePath, files);
   }
 
-  getDockerCmd(templateType) {
-    const cmds = {
-      'nodejs': '["npm", "start"]',
-      'react': '["npm", "start"]',
-      'python': '["python", "src/main.py"]',
-      'go': '["/app/app"]',
-      'rust': '["/app/target/release/app"]',
-      'c': '["/app/build/app"]',
-      'cpp': '["/app/build/app"]'
-    };
-    return cmds[templateType] || '["echo", "No command specified"]';
+  async createTemplateFiles(templatePath, files) {
+    for (const [filePath, content] of Object.entries(files)) {
+      const fullPath = path.join(templatePath, filePath);
+      await fs.ensureDir(path.dirname(fullPath));
+      await fs.writeFile(fullPath, content);
+    }
   }
 
-  generateGitignore(template) {
-    return `# Dependencies
-node_modules/
-vendor/
-target/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
-pip-log.txt
-pip-delete-this-directory.txt
+  async listTemplates() {
+    if (!await fs.pathExists(this.customTemplatesDir)) {
+      return [];
+    }
 
-# Build outputs
-build/
-dist/
-*.egg-info/
-*.so
-*.dll
+    const templates = await fs.readdir(this.customTemplatesDir);
+    const templateList = [];
 
-# Environment variables
-.env
-.env.local
+    for (const template of templates) {
+      const templatePath = path.join(this.customTemplatesDir, template);
+      const configPath = path.join(templatePath, 'template.json');
+      
+      let config = { name: template, description: 'No description' };
+      if (await fs.pathExists(configPath)) {
+        try {
+          config = await fs.readJson(configPath);
+        } catch (error) {
+          config.description = 'Invalid config';
+        }
+      }
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+      templateList.push({
+        name: template,
+        description: config.description,
+        language: config.language || 'unknown',
+        created: config.created || 'unknown'
+      });
+    }
 
-# OS
-.DS_Store
-Thumbs.db
-`;
+    return templateList;
   }
 
-  generateEnvExample() {
-    return `# Environment Variables Example
-DATABASE_URL=postgresql://user:password@localhost:5432/dbname
-REDIS_URL=redis://localhost:6379
-JWT_SECRET=your-secret-key-here
-PORT=3000
-NODE_ENV=development
-`;
-  }
-
-  generateDockerCompose(projectData) {
-    return `version: '3.8'
-
-services:
-  app:
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=development
-    volumes:
-      - .:/app
-      - /app/node_modules
-
-  # Uncomment to add database
-  # postgres:
-  #   image: postgres:15
-  #   environment:
-  #     POSTGRES_DB: ${projectData.projectName}
-  #     POSTGRES_USER: user
-  #     POSTGRES_PASSWORD: password
-  #   ports:
-  #     - "5432:5432"
-
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-`;
-  }
-
-  async generateDefaultFile(fileName, projectData, template) {
-    // For unknown file types, create a basic template
-    const ext = path.extname(fileName).toLowerCase();
+  async deleteTemplate() {
+    const templates = await this.listTemplates();
     
-    const templates = {
-      '.js': `// ${projectData.projectName}\n// ${fileName}\n\nconsole.log('Hello from ${fileName}');`,
-      '.py': `# ${projectData.projectName}\n# ${fileName}\n\nprint("Hello from ${fileName}")`,
-      '.go': `package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello from ${fileName}")\n}`,
-      '.rs': `fn main() {\n    println!("Hello from {}!", "${fileName}");\n}`,
-      '.c': `#include <stdio.h>\n\nint main() {\n    printf("Hello from ${fileName}\\n");\n    return 0;\n}`,
-      '.cpp': `#include <iostream>\n\nint main() {\n    std::cout << "Hello from ${fileName}" << std::endl;\n    return 0;\n}`,
-      '.html': `<!DOCTYPE html>\n<html>\n<head>\n    <title>${projectData.projectName}</title>\n</head>\n<body>\n    <h1>Welcome to ${projectData.projectName}</h1>\n</body>\n</html>`,
-      '.css': `/* ${projectData.projectName} - ${fileName} */\nbody {\n    margin: 0;\n    font-family: Arial, sans-serif;\n}`,
-      '.json': `{\n  "name": "${fileName}",\n  "description": "Generated by GoDev"\n}`
-    };
+    if (templates.length === 0) {
+      console.log(chalk.yellow('No templates found.'));
+      return;
+    }
 
-    return templates[ext] || `# ${fileName}\n# Generated by GoDev for ${projectData.projectName}\n\n${projectData.description || 'Add your content here'}`;
+    const choices = templates.map(template => ({
+      name: `${template.name} (${template.language}) - ${template.description}`,
+      value: template.name
+    }));
+
+    const { templateToDelete } = await inquirer.prompt([{
+      type: 'list',
+      name: 'templateToDelete',
+      message: 'Select template to delete:',
+      choices
+    }]);
+
+    const { confirm } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'confirm',
+      message: `Permanently delete '${templateToDelete}'?`,
+      default: false
+    }]);
+
+    if (confirm) {
+      const templatePath = path.join(this.customTemplatesDir, templateToDelete);
+      await fs.remove(templatePath);
+      console.log(chalk.green(`✅ Template '${templateToDelete}' deleted.`));
+    } else {
+      console.log(chalk.yellow('Deletion cancelled.'));
+    }
+  }
+
+  async editTemplate() {
+    const templates = await this.listTemplates();
+    
+    if (templates.length === 0) {
+      console.log(chalk.yellow('No templates to edit.'));
+      return;
+    }
+
+    const choices = templates.map(template => ({
+      name: `${template.name} (${template.language}) - ${template.description}`,
+      value: template.name
+    }));
+
+    const { templateToEdit } = await inquirer.prompt([{
+      type: 'list',
+      name: 'templateToEdit',
+      message: 'Select template to edit:',
+      choices
+    }]);
+
+    const templatePath = path.join(this.customTemplatesDir, templateToEdit);
+    console.log(chalk.green(`\n📁 Template location: ${templatePath}`));
+    console.log(chalk.yellow('\n💡 Edit files directly in this directory.'));
+    console.log(chalk.blue('   Use template variables in your files:'));
+    console.log('   {{PROJECT_NAME}}, {{PROJECT_DESCRIPTION}}, {{PROJECT_AUTHOR}}, etc.');
+  }
+
+  getTemplatesDir() {
+    return this.customTemplatesDir;
   }
 }
