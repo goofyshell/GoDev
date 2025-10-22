@@ -24,13 +24,34 @@ ensure_path() {
     # Add to PATH for current session
     export PATH="$BIN_DIR:$PATH"
     
-    # Add to shell config files if not already there
-    if ! grep -q "\.local/bin" ~/.bashrc; then
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+    # Detect current shell and add to appropriate config file
+    local current_shell=$(basename "$SHELL")
+    local config_file=""
+    
+    case $current_shell in
+        "zsh")
+            config_file="$HOME/.zshrc"
+            ;;
+        "bash")
+            config_file="$HOME/.bashrc"
+            ;;
+        *)
+            config_file="$HOME/.bashrc"
+            ;;
+    esac
+    
+    # Add to config file if not already there
+    if [ -n "$config_file" ] && ! grep -q "\.local/bin" "$config_file" 2>/dev/null; then
+        echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$config_file"
+        print_success "Added ~/.local/bin to $config_file"
     fi
-    if ! grep -q "\.local/bin" ~/.zshrc; then
-        echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-    fi
+    
+    # Also add to common config files as backup
+    for file in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+        if [ -f "$file" ] && ! grep -q "\.local/bin" "$file" 2>/dev/null; then
+            echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$file"
+        fi
+    done
 }
 
 install_godev() {
@@ -77,9 +98,12 @@ install_godev() {
         print_success "Try: godev --help"
     else
         print_warning "Commands not found in current session."
-        print_success "Installation completed! Please restart your terminal or run:"
-        echo "  source ~/.bashrc"
+        echo
+        print_success "Installation completed! To use GoDev, run:"
+        echo "  source ~/.zshrc"
         echo "Then try: godev --help"
+        echo
+        echo "Or restart your terminal."
     fi
 }
 
