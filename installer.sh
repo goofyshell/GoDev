@@ -44,8 +44,20 @@ print_divider() {
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
-# Interactive menu
+# Check if we're running in a pipe (curl | bash)
+is_piped() {
+    [ ! -t 0 ]
+}
+
+# Interactive menu - only show if we have a terminal
 show_interactive_menu() {
+    if is_piped; then
+        echo -e "${YELLOW}Running in piped mode - defaulting to install...${NC}"
+        echo
+        install_godev
+        return
+    fi
+    
     print_banner
     echo -e "${CYAN}GoDev Installer v$VERSION${NC}"
     echo
@@ -123,13 +135,20 @@ check_dependencies() {
     
     if [ ${#missing_deps[@]} -ne 0 ]; then
         print_warning "Missing: ${missing_deps[*]}"
-        read -p "└─ Install automatically? (y/n): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        
+        # If piped, auto-install dependencies
+        if is_piped; then
+            echo "└─ Auto-installing dependencies..."
             install_dependencies "${missing_deps[@]}"
         else
-            print_error "Please install manually: ${missing_deps[*]}"
-            exit 1
+            read -p "└─ Install automatically? (y/n): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                install_dependencies "${missing_deps[@]}"
+            else
+                print_error "Please install manually: ${missing_deps[*]}"
+                exit 1
+            fi
         fi
     else
         print_substep "All dependencies found"
@@ -332,24 +351,6 @@ uninstall_godev() {
     echo
 }
 
-# Show help
-show_help() {
-    print_banner
-    echo -e "${CYAN}GoDev Installer v$VERSION${NC}"
-    echo
-    echo -e "${YELLOW}Usage:${NC}"
-    echo "  curl -fsSL https://raw.githubusercontent.com/goofyshell/godev/main/installer.sh | bash"
-    echo "  curl -fsSL ... | bash -s install    (default)"
-    echo "  curl -fsSL ... | bash -s update"
-    echo "  curl -fsSL ... | bash -s uninstall"
-    echo
-    echo -e "${YELLOW}Examples:${NC}"
-    echo "  Install:   curl -fsSL ... | bash"
-    echo "  Update:    curl -fsSL ... | bash -s update"
-    echo "  Uninstall: curl -fsSL ... | bash -s uninstall"
-    echo
-}
-
 # Main function
 main() {
     local command=${1:-}
@@ -376,6 +377,24 @@ main() {
             exit 1
             ;;
     esac
+}
+
+# Show help
+show_help() {
+    print_banner
+    echo -e "${CYAN}GoDev Installer v$VERSION${NC}"
+    echo
+    echo -e "${YELLOW}Usage:${NC}"
+    echo "  curl -fsSL https://raw.githubusercontent.com/goofyshell/godev/main/installer.sh | bash"
+    echo "  curl -fsSL ... | bash -s install    (default in pipe)"
+    echo "  curl -fsSL ... | bash -s update"
+    echo "  curl -fsSL ... | bash -s uninstall"
+    echo
+    echo -e "${YELLOW}Examples:${NC}"
+    echo "  Install:   curl -fsSL ... | bash"
+    echo "  Update:    curl -fsSL ... | bash -s update"
+    echo "  Uninstall: curl -fsSL ... | bash -s uninstall"
+    echo
 }
 
 # Run main function
