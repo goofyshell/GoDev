@@ -18,7 +18,9 @@ export class DebianCompiler {
       'rust': { compiler: 'cargo build', package: 'cargo', extension: '.rs' },
       'nodejs': { compiler: 'node', package: 'nodejs', extension: '.js', runtime: true },
       'python': { compiler: 'python3', package: 'python3', extension: '.py', runtime: true },
-      'web': { compiler: 'browser', package: '', extension: '.html', runtime: true }
+      'web': { compiler: 'browser', package: '', extension: '.html', runtime: true },
+      'react': { compiler: 'npm', package: 'nodejs', extension: '.jsx', runtime: true },
+      'docker': { compiler: 'docker', package: 'docker.io', extension: '', runtime: false }
     };
 
     this.buildDir = './build';
@@ -46,7 +48,7 @@ export class DebianCompiler {
       console.log(chalk.gray(`📁 Project path: ${absoluteProjectPath}`));
 
       // Check and install dependencies (skip for web projects)
-      if (projectType !== 'web') {
+      if (projectType !== 'web' && projectType !== 'react' && projectType !== 'docker') {
         await this.ensureDependencies(projectType);
       }
 
@@ -81,7 +83,7 @@ export class DebianCompiler {
       console.log(chalk.gray('📂 Root directory:'), files.join(', '));
       
       // Check for common source directories
-      const commonDirs = ['src', 'lib', 'include', 'source', 'headers', 'css', 'js'];
+      const commonDirs = ['src', 'lib', 'include', 'source', 'headers', 'css', 'js', 'components'];
       let foundDirs = [];
       
       for (const dir of commonDirs) {
@@ -89,7 +91,7 @@ export class DebianCompiler {
         if (await fs.pathExists(dirPath)) {
           const dirFiles = await fs.readdir(dirPath).catch(() => []);
           const sourceFiles = dirFiles.filter(file => 
-            ['.c', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.html', '.css', '.js'].includes(path.extname(file).toLowerCase())
+            ['.c', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.html', '.css', '.js', '.jsx', '.ts', '.tsx', '.py', '.rs', '.go'].includes(path.extname(file).toLowerCase())
           );
           if (sourceFiles.length > 0) {
             foundDirs.push(`${dir}/ (${sourceFiles.length} files)`);
@@ -102,7 +104,7 @@ export class DebianCompiler {
       }
       
       // Count source files recursively
-      const allSourceFiles = await this.findFilesRecursive(projectPath, ['.c', '.cpp', '.cc', '.cxx', '.go', '.rs', '.js', '.py', '.html', '.css']);
+      const allSourceFiles = await this.findFilesRecursive(projectPath, ['.c', '.cpp', '.cc', '.cxx', '.go', '.rs', '.js', '.jsx', '.ts', '.tsx', '.py', '.html', '.css']);
       console.log(chalk.gray('📄 Total source files:'), allSourceFiles.length);
       
       if (allSourceFiles.length > 0) {
@@ -129,7 +131,11 @@ export class DebianCompiler {
         'package.json': 'nodejs',
         'requirements.txt': 'python',
         'setup.py': 'python',
-        'pyproject.toml': 'python'
+        'pyproject.toml': 'python',
+        'vite.config.js': 'react',
+        'vite.config.ts': 'react',
+        'Dockerfile': 'docker',
+        'docker-compose.yml': 'docker'
       };
 
       for (const [file, lang] of Object.entries(configFiles)) {
@@ -141,10 +147,17 @@ export class DebianCompiler {
       // Check for HTML/CSS/JS projects
       const hasHtmlFiles = (await this.findFilesRecursive(projectPath, ['.html'])).length > 0;
       const hasCssFiles = (await this.findFilesRecursive(projectPath, ['.css'])).length > 0;
-      const hasJsFiles = (await this.findFilesRecursive(projectPath, ['.js'])).length > 0;
+      const hasJsFiles = (await this.findFilesRecursive(projectPath, ['.js', '.jsx', '.ts', '.tsx'])).length > 0;
       
       // If we have HTML files and this looks like a web project
       if (hasHtmlFiles) {
+        // Check if it's a React project (has JSX/TSX files)
+        const hasJsxFiles = (await this.findFilesRecursive(projectPath, ['.jsx', '.tsx'])).length > 0;
+        if (hasJsxFiles) {
+          console.log(chalk.gray('⚛️  Detected: React project'));
+          return 'react';
+        }
+        
         // Check if it's a web project (has HTML + CSS/JS but no Node.js files)
         const hasNodeModules = await fs.pathExists(path.join(projectPath, 'node_modules'));
         const hasPackageJson = await fs.pathExists(path.join(projectPath, 'package.json'));
@@ -179,6 +192,7 @@ export class DebianCompiler {
         'rust': await this.findFilesRecursive(projectPath, ['.rs']),
         'nodejs': await this.findFilesRecursive(projectPath, ['.js', '.mjs', '.cjs']),
         'python': await this.findFilesRecursive(projectPath, ['.py']),
+        'react': await this.findFilesRecursive(projectPath, ['.jsx', '.tsx']),
         'web': await this.findFilesRecursive(projectPath, ['.html'])
       };
 
@@ -241,7 +255,8 @@ export class DebianCompiler {
               !file.startsWith('.') && 
               file !== 'node_modules' && 
               file !== 'build' && 
-              file !== 'target') {
+              file !== 'target' &&
+              file !== 'dist') {
             const found = await this.findFileRecursive(fullPath, fileName);
             if (found) return found;
           }
@@ -370,6 +385,10 @@ export class DebianCompiler {
           return await this.preparePython(projectPath);
         case 'web':
           return await this.prepareWeb(projectPath);
+        case 'react':
+          return await this.prepareReact(projectPath);
+        case 'docker':
+          return await this.prepareDocker(projectPath);
         default:
           throw new Error(`Unsupported language: ${language}`);
       }
@@ -379,7 +398,31 @@ export class DebianCompiler {
   }
 
   async compileC(projectPath, outputPath) {
-    // Find all .c files recursively
+    // Check for Makefile first
+    const makefile = await this.findFileRecursive(projectPath, 'Makefile');
+    if (makefile) {
+      console.log(chalk.blue('🔨 Using Makefile for C project'));
+      await execAsync('make', { cwd: path.dirname(makefile) });
+      
+      // Look for the built executable
+      const builtFiles = await this.findFilesRecursive(projectPath, ['']);
+      const executable = builtFiles.find(f => {
+        try {
+          const stat = fs.statSync(f);
+          return stat.isFile() && (stat.mode & fs.constants.X_OK);
+        } catch {
+          return false;
+        }
+      });
+      
+      if (executable) {
+        await fs.ensureDir(path.dirname(outputPath));
+        await fs.copy(executable, outputPath);
+        return { success: true, output: outputPath, executable: outputPath };
+      }
+    }
+
+    // Fallback to direct compilation
     const files = await this.findFilesRecursive(projectPath, ['.c']);
     
     if (files.length === 0) {
@@ -405,6 +448,31 @@ export class DebianCompiler {
   }
 
   async compileCpp(projectPath, outputPath) {
+    // Check for Makefile first
+    const makefile = await this.findFileRecursive(projectPath, 'Makefile');
+    if (makefile) {
+      console.log(chalk.blue('🔨 Using Makefile for C++ project'));
+      await execAsync('make', { cwd: path.dirname(makefile) });
+      
+      // Look for the built executable
+      const builtFiles = await this.findFilesRecursive(projectPath, ['']);
+      const executable = builtFiles.find(f => {
+        try {
+          const stat = fs.statSync(f);
+          return stat.isFile() && (stat.mode & fs.constants.X_OK);
+        } catch {
+          return false;
+        }
+      });
+      
+      if (executable) {
+        await fs.ensureDir(path.dirname(outputPath));
+        await fs.copy(executable, outputPath);
+        return { success: true, output: outputPath, executable: outputPath };
+      }
+    }
+
+    // Fallback to direct compilation
     const files = await this.findFilesRecursive(projectPath, ['.cpp', '.cc', '.cxx']);
     
     if (files.length === 0) {
@@ -554,6 +622,43 @@ export class DebianCompiler {
     };
   }
 
+  async prepareReact(projectPath) {
+    // Install npm dependencies if package.json exists
+    const packageJson = await this.findFileRecursive(projectPath, 'package.json');
+    if (packageJson) {
+      console.log(chalk.blue('📦 Installing React dependencies...'));
+      await execAsync('npm install', { cwd: path.dirname(packageJson) });
+    }
+
+    console.log(chalk.blue('⚛️  React project prepared'));
+    console.log(chalk.gray('   Run with: npm run dev'));
+    
+    return { 
+      success: true, 
+      output: projectPath,
+      executable: 'npm run dev',
+      runtime: 'npm'
+    };
+  }
+
+  async prepareDocker(projectPath) {
+    const dockerfile = await this.findFileRecursive(projectPath, 'Dockerfile');
+    if (!dockerfile) {
+      throw new Error('No Dockerfile found');
+    }
+
+    console.log(chalk.blue('🐳 Docker project detected'));
+    console.log(chalk.gray('   Build with: docker build -t myapp .'));
+    console.log(chalk.gray('   Run with: docker run -p 3000:3000 myapp'));
+    
+    return { 
+      success: true, 
+      output: projectPath,
+      executable: 'docker build -t myapp . && docker run -p 3000:3000 myapp',
+      runtime: 'docker'
+    };
+  }
+
   async findMainFile(projectPath, extension) {
     const files = await this.findFilesRecursive(projectPath, [extension]);
     
@@ -586,7 +691,9 @@ export class DebianCompiler {
       'rust': '-rust',
       'nodejs': '.js',
       'python': '.py',
-      'web': '.html'
+      'web': '.html',
+      'react': '-react',
+      'docker': '-docker'
     };
 
     return `${baseName}${extensions[language]}`;
@@ -623,6 +730,60 @@ export class DebianCompiler {
               console.log(chalk.blue(`Please open manually: ${result.output}`));
             }
           });
+        }
+      } else if (result.runtime === 'npm') {
+        const { run } = await inquirer.prompt([{
+          type: 'confirm',
+          name: 'run',
+          message: 'Start development server?',
+          default: true
+        }]);
+
+        if (run) {
+          console.log(chalk.blue('\n🚀 Starting development server...\n'));
+          console.log(chalk.gray(`$ ${result.executable}`));
+          
+          const child = spawn(result.executable.split(' ')[0], result.executable.split(' ').slice(1), {
+            stdio: 'inherit',
+            shell: true,
+            cwd: path.dirname(result.output)
+          });
+
+          child.on('close', (code) => {
+            console.log(chalk.blue(`\nDevelopment server exited with code: ${code}`));
+          });
+        }
+      } else if (result.runtime === 'docker') {
+        const { run } = await inquirer.prompt([{
+          type: 'confirm',
+          name: 'run',
+          message: 'Build and run with Docker?',
+          default: false
+        }]);
+
+        if (run) {
+          console.log(chalk.blue('\n🐳 Building and running with Docker...\n'));
+          console.log(chalk.gray(`$ ${result.executable}`));
+          
+          // Split the compound command and run sequentially
+          const commands = result.executable.split(' && ');
+          for (const cmd of commands) {
+            const [dockerCmd, ...args] = cmd.trim().split(' ');
+            const child = spawn(dockerCmd, args, {
+              stdio: 'inherit',
+              shell: false,
+              cwd: path.dirname(result.output)
+            });
+
+            await new Promise((resolve) => {
+              child.on('close', (code) => {
+                if (code !== 0) {
+                  console.log(chalk.red(`Docker command failed with code: ${code}`));
+                }
+                resolve();
+              });
+            });
+          }
         }
       } else if (result.runtime) {
         const { run } = await inquirer.prompt([{
@@ -696,19 +857,30 @@ export class DebianCompiler {
     } else {
       console.log(chalk.yellow(`📁 Build directory does not exist: ${buildDir}`));
     }
+
+    // Also clean common build directories for other languages
+    const commonBuildDirs = ['target', 'dist', 'node_modules', '__pycache__', '.pytest_cache'];
+    for (const dir of commonBuildDirs) {
+      const dirPath = path.join(absolutePath, dir);
+      if (await fs.pathExists(dirPath)) {
+        await fs.remove(dirPath);
+        console.log(chalk.green(`🧹 Cleaned: ${dir}`));
+      }
+    }
   }
 
   async showSystemInfo() {
     console.log(chalk.blue.bold('\n💻 System Compiler Information\n'));
     
     try {
-      const [osInfo, gccVersion, goVersion, nodeVersion, pythonVersion, rustVersion] = await Promise.all([
+      const [osInfo, gccVersion, goVersion, nodeVersion, pythonVersion, rustVersion, dockerVersion] = await Promise.all([
         execAsync('lsb_release -d').catch(() => ({ stdout: 'Unknown' })),
         execAsync('gcc --version | head -n1').catch(() => ({ stdout: 'Not installed' })),
         execAsync('go version 2>/dev/null').catch(() => ({ stdout: 'Not installed' })),
         execAsync('node --version 2>/dev/null').catch(() => ({ stdout: 'Not installed' })),
         execAsync('python3 --version 2>/dev/null').catch(() => ({ stdout: 'Not installed' })),
-        execAsync('cargo --version 2>/dev/null').catch(() => ({ stdout: 'Not installed' }))
+        execAsync('cargo --version 2>/dev/null').catch(() => ({ stdout: 'Not installed' })),
+        execAsync('docker --version 2>/dev/null').catch(() => ({ stdout: 'Not installed' }))
       ]);
 
       console.log(`OS: ${osInfo.stdout.toString().trim().replace('Description:\t', '')}`);
@@ -717,6 +889,7 @@ export class DebianCompiler {
       console.log(`Node.js: ${nodeVersion.stdout.toString().trim()}`);
       console.log(`Python: ${pythonVersion.stdout.toString().trim()}`);
       console.log(`Rust: ${rustVersion.stdout.toString().trim()}`);
+      console.log(`Docker: ${dockerVersion.stdout.toString().trim()}`);
     } catch (error) {
       console.log(chalk.red('Error getting system info:'), error.message);
     }
