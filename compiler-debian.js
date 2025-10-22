@@ -83,7 +83,7 @@ export class DebianCompiler {
       console.log(chalk.gray('📂 Root directory:'), files.join(', '));
       
       // Check for common source directories
-      const commonDirs = ['src', 'lib', 'include', 'source', 'headers', 'css', 'js', 'components'];
+      const commonDirs = ['src', 'lib', 'include', 'source', 'headers', 'css', 'js', 'components', 'Private', 'Public'];
       let foundDirs = [];
       
       for (const dir of commonDirs) {
@@ -170,7 +170,7 @@ export class DebianCompiler {
 
       // Check for C/C++ build systems - IMPROVED DETECTION
       const makefile = await this.findFileRecursive(projectPath, 'Makefile') || 
-                      await this.findFileRecursive(projectPath, 'makefile');
+                    await this.findFileRecursive(projectPath, 'makefile');
       
       if (makefile) {
         // Read Makefile content to determine language
@@ -261,123 +261,6 @@ export class DebianCompiler {
       console.log(chalk.red('Detection error:'), error.message);
       return null;
     }
-  }
-
-  async prepareNode(projectPath) {
-    // Install npm dependencies if package.json exists
-    const packageJson = await this.findFileRecursive(projectPath, 'package.json');
-    if (packageJson) {
-      console.log(chalk.blue('📦 Installing npm dependencies...'));
-      await execAsync('npm install', { cwd: path.dirname(packageJson) });
-    }
-
-    // IMPROVED: Look for the actual main file, not just any .js file
-    const mainFile = await this.findNodeMainFile(projectPath);
-    return { 
-      success: true, 
-      output: mainFile, 
-      executable: `node "${mainFile}"`,
-      runtime: 'node'
-    };
-  }
-
-  async findNodeMainFile(projectPath) {
-    // First, check package.json for the main entry
-    const packageJson = await this.findFileRecursive(projectPath, 'package.json');
-    if (packageJson) {
-      try {
-        const pkg = await fs.readJson(packageJson);
-        if (pkg.main) {
-          const mainFromPkg = path.join(path.dirname(packageJson), pkg.main);
-          if (await fs.pathExists(mainFromPkg)) {
-            console.log(chalk.gray(`📦 Using main from package.json: ${pkg.main}`));
-            return mainFromPkg;
-          }
-        }
-        
-        // Check for common script patterns
-        if (pkg.scripts) {
-          const startScript = pkg.scripts.start || pkg.scripts.dev;
-          if (startScript && startScript.includes('node')) {
-            // Extract the main file from the start script
-            const match = startScript.match(/node\s+([^\s]+)/);
-            if (match && match[1]) {
-              const mainFromScript = path.join(path.dirname(packageJson), match[1]);
-              if (await fs.pathExists(mainFromScript)) {
-                console.log(chalk.gray(`📦 Using main from start script: ${match[1]}`));
-                return mainFromScript;
-              }
-            }
-          }
-        }
-      } catch (error) {
-        console.log(chalk.yellow('⚠️  Could not read package.json, falling back to file search'));
-      }
-    }
-
-    // Fallback: look for common server/main files
-    const priorityFiles = [
-      'app.js', 'server.js', 'index.js', 'main.js',
-      'src/app.js', 'src/server.js', 'src/index.js', 'src/main.js',
-      'lib/app.js', 'lib/server.js', 'lib/index.js', 'lib/main.js'
-    ];
-
-    for (const file of priorityFiles) {
-      const fullPath = path.join(projectPath, file);
-      if (await fs.pathExists(fullPath)) {
-        console.log(chalk.gray(`📦 Found main file: ${file}`));
-        return fullPath;
-      }
-    }
-
-    // Last resort: find any .js file that looks like a main file
-    const allJsFiles = await this.findFilesRecursive(projectPath, ['.js', '.mjs', '.cjs']);
-    
-    // Filter out client-side files in public/ or static/ directories
-    const serverFiles = allJsFiles.filter(file => {
-      const relativePath = path.relative(projectPath, file);
-      return !relativePath.includes('Public/') && 
-            !relativePath.includes('public/') && 
-            !relativePath.includes('Static/') && 
-            !relativePath.includes('static/') &&
-            !relativePath.includes('assets/') &&
-            !relativePath.includes('js/') &&
-            !file.includes('node_modules');
-    });
-
-    if (serverFiles.length > 0) {
-      // Look for files that import express or other server frameworks
-      for (const file of serverFiles) {
-        try {
-          const content = await fs.readFile(file, 'utf8');
-          if (content.includes('require(') || content.includes('import')) {
-            const serverIndicators = [
-              'express', 'http.createServer', 'app.listen', 'server.listen',
-              'koa', 'fastify', 'hapi', 'sails', 'meteor'
-            ];
-            if (serverIndicators.some(indicator => content.includes(indicator))) {
-              console.log(chalk.gray(`📦 Detected server file: ${path.relative(projectPath, file)}`));
-              return file;
-            }
-          }
-        } catch (error) {
-          // Skip files we can't read
-        }
-      }
-
-      // If no server indicators found, return the first server file
-      const firstServerFile = serverFiles[0];
-      console.log(chalk.gray(`📦 Using first server file: ${path.relative(projectPath, firstServerFile)}`));
-      return firstServerFile;
-    }
-
-    // Final fallback: any .js file
-    if (allJsFiles.length > 0) {
-      console.log(chalk.yellow('⚠️  Could not identify main server file, using first .js file'));
-      return allJsFiles[0];
-    }
-
-    throw new Error('No JavaScript files found in project directory');
   }
 
   async findFileRecursive(dir, fileName) {
@@ -799,13 +682,123 @@ export class DebianCompiler {
       await execAsync('npm install', { cwd: path.dirname(packageJson) });
     }
 
-    const mainFile = await this.findMainFile(projectPath, '.js');
+    // IMPROVED: Use the smart main file detection
+    const mainFile = await this.findNodeMainFile(projectPath);
     return { 
       success: true, 
       output: mainFile, 
       executable: `node "${mainFile}"`,
       runtime: 'node'
     };
+  }
+
+  async findNodeMainFile(projectPath) {
+    // First, check package.json for the main entry
+    const packageJson = await this.findFileRecursive(projectPath, 'package.json');
+    if (packageJson) {
+      try {
+        const pkg = await fs.readJson(packageJson);
+        console.log(chalk.gray(`📦 Found package.json: ${pkg.name}`));
+        
+        if (pkg.main) {
+          const mainFromPkg = path.join(path.dirname(packageJson), pkg.main);
+          if (await fs.pathExists(mainFromPkg)) {
+            console.log(chalk.green(`📦 Using main from package.json: ${pkg.main}`));
+            return mainFromPkg;
+          }
+        }
+        
+        // Check for common script patterns
+        if (pkg.scripts) {
+          const startScript = pkg.scripts.start || pkg.scripts.dev;
+          if (startScript) {
+            console.log(chalk.gray(`📦 Start script: ${startScript}`));
+            // Extract the main file from the start script
+            const match = startScript.match(/node\s+([^\s]+)/);
+            if (match && match[1]) {
+              const mainFromScript = path.join(path.dirname(packageJson), match[1]);
+              if (await fs.pathExists(mainFromScript)) {
+                console.log(chalk.green(`📦 Using main from start script: ${match[1]}`));
+                return mainFromScript;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.log(chalk.yellow('⚠️  Could not read package.json, falling back to file search'));
+      }
+    }
+
+    // Fallback: look for common server/main files in root directory FIRST
+    const priorityFiles = [
+      'app.js', 'server.js', 'index.js', 'main.js',
+      'src/app.js', 'src/server.js', 'src/index.js', 'src/main.js',
+      'lib/app.js', 'lib/server.js', 'lib/index.js', 'lib/main.js'
+    ];
+
+    for (const file of priorityFiles) {
+      const fullPath = path.join(projectPath, file);
+      if (await fs.pathExists(fullPath)) {
+        console.log(chalk.green(`📦 Found main file: ${file}`));
+        return fullPath;
+      }
+    }
+
+    // Last resort: find any .js file that looks like a main file
+    const allJsFiles = await this.findFilesRecursive(projectPath, ['.js', '.mjs', '.cjs']);
+    
+    if (allJsFiles.length === 0) {
+      throw new Error('No JavaScript files found in project directory');
+    }
+
+    // Filter out client-side files in public/ or static/ directories
+    const serverFiles = allJsFiles.filter(file => {
+      const relativePath = path.relative(projectPath, file).toLowerCase();
+      return !relativePath.includes('public/') && 
+             !relativePath.includes('static/') &&
+             !relativePath.includes('assets/') &&
+             !relativePath.includes('css/') &&
+             !relativePath.includes('js/') &&
+             !file.includes('node_modules');
+    });
+
+    if (serverFiles.length > 0) {
+      // Look for files that import express or other server frameworks
+      for (const file of serverFiles) {
+        try {
+          const content = await fs.readFile(file, 'utf8');
+          if (content.includes('require(') || content.includes('import')) {
+            const serverIndicators = [
+              'express', 'http.createServer', 'app.listen', 'server.listen',
+              'koa', 'fastify', 'hapi', 'sails', 'meteor', 'listen(3000)',
+              'listen(port)', 'createServer'
+            ];
+            if (serverIndicators.some(indicator => content.includes(indicator))) {
+              console.log(chalk.green(`📦 Detected server file: ${path.relative(projectPath, file)}`));
+              return file;
+            }
+          }
+        } catch (error) {
+          // Skip files we can't read
+        }
+      }
+
+      // If no server indicators found, return the first server file
+      const firstServerFile = serverFiles[0];
+      console.log(chalk.green(`📦 Using first server file: ${path.relative(projectPath, firstServerFile)}`));
+      return firstServerFile;
+    }
+
+    // Final fallback: any .js file in root directory
+    const rootJsFiles = allJsFiles.filter(file => path.dirname(file) === projectPath);
+    if (rootJsFiles.length > 0) {
+      console.log(chalk.yellow('⚠️  Could not identify main server file, using first root .js file'));
+      return rootJsFiles[0];
+    }
+
+    // Absolute last resort: first .js file
+    console.log(chalk.yellow('⚠️  Using first .js file found'));
+    return allJsFiles[0];
   }
 
   async preparePython(projectPath) {
