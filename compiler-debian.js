@@ -29,12 +29,15 @@ export class DebianCompiler {
     try {
       const absoluteProjectPath = path.resolve(projectPath);
       
+      // Show what we're working with
+      await this.debugProjectStructure(absoluteProjectPath);
+      
       // Detect project type
       const projectType = await this.detectProjectType(absoluteProjectPath);
       
       if (!projectType) {
-        console.log(chalk.yellow('❓ Could not detect project type'));
-        console.log(chalk.gray('Make sure you have project files in the directory'));
+        console.log(chalk.yellow('❓ Could not auto-detect project type'));
+        console.log(chalk.yellow('💡 Try specifying the language manually with: godev-compile build --lang c'));
         return;
       }
 
@@ -67,50 +70,166 @@ export class DebianCompiler {
     }
   }
 
-  async detectProjectType(projectPath) {
-    // First, check for project configuration files (highest priority)
-    const files = await fs.readdir(projectPath);
-
-    // Check for specific project files
-    if (await this.findFileRecursive(projectPath, 'Cargo.toml')) return 'rust';
-    if (await this.findFileRecursive(projectPath, 'go.mod')) return 'go';
-    if (await this.findFileRecursive(projectPath, 'package.json')) return 'nodejs';
-    if (await this.findFileRecursive(projectPath, 'requirements.txt')) return 'python';
+  async debugProjectStructure(projectPath) {
+    console.log(chalk.yellow('🔍 Analyzing project structure...'));
     
-    // Check for source files recursively
-    const sourceFiles = await this.findFilesRecursive(projectPath, Object.values(this.supportedLanguages).map(lang => lang.extension));
-    
-    if (sourceFiles.length > 0) {
-      const ext = path.extname(sourceFiles[0]);
-      return Object.keys(this.supportedLanguages).find(lang => 
-        this.supportedLanguages[lang].extension === ext
-      );
+    try {
+      const files = await fs.readdir(projectPath);
+      console.log(chalk.gray('📂 Root directory:'), files.join(', '));
+      
+      // Check for common source directories
+      const commonDirs = ['src', 'lib', 'include', 'source', 'headers'];
+      let foundDirs = [];
+      
+      for (const dir of commonDirs) {
+        const dirPath = path.join(projectPath, dir);
+        if (await fs.pathExists(dirPath)) {
+          const dirFiles = await fs.readdir(dirPath).catch(() => []);
+          const sourceFiles = dirFiles.filter(file => 
+            ['.c', '.cpp', '.cc', '.cxx', '.h', '.hpp'].includes(path.extname(file).toLowerCase())
+          );
+          if (sourceFiles.length > 0) {
+            foundDirs.push(`${dir}/ (${sourceFiles.length} files)`);
+          }
+        }
+      }
+      
+      if (foundDirs.length > 0) {
+        console.log(chalk.gray('📁 Source directories:'), foundDirs.join(', '));
+      }
+      
+      // Count source files recursively
+      const allSourceFiles = await this.findFilesRecursive(projectPath, ['.c', '.cpp', '.cc', '.cxx', '.go', '.rs', '.js', '.py']);
+      console.log(chalk.gray('📄 Total source files:'), allSourceFiles.length);
+      
+      if (allSourceFiles.length > 0) {
+        allSourceFiles.slice(0, 5).forEach(file => {
+          console.log(chalk.gray('   └─'), path.relative(projectPath, file));
+        });
+        if (allSourceFiles.length > 5) {
+          console.log(chalk.gray('   └─ ... and', allSourceFiles.length - 5, 'more'));
+        }
+      }
+      
+    } catch (error) {
+      console.log(chalk.red('Debug error:'), error.message);
     }
+    console.log();
+  }
 
-    return null;
+  async detectProjectType(projectPath) {
+    try {
+      // First, check for obvious project configuration files
+      const configFiles = {
+        'Cargo.toml': 'rust',
+        'go.mod': 'go', 
+        'package.json': 'nodejs',
+        'requirements.txt': 'python',
+        'setup.py': 'python',
+        'pyproject.toml': 'python'
+      };
+
+      for (const [file, lang] of Object.entries(configFiles)) {
+        if (await this.findFileRecursive(projectPath, file)) {
+          return lang;
+        }
+      }
+
+      // Check for C/C++ build systems
+      const buildFiles = {
+        'CMakeLists.txt': 'cpp',
+        'Makefile': 'c',
+        'makefile': 'c',
+        'configure': 'c',
+        'autogen.sh': 'c'
+      };
+
+      for (const [file, lang] of Object.entries(buildFiles)) {
+        if (await this.findFileRecursive(projectPath, file)) {
+          console.log(chalk.gray(`📋 Found build system: ${file}`));
+          return lang;
+        }
+      }
+
+      // Count source files by type
+      const fileTypes = {
+        'c': await this.findFilesRecursive(projectPath, ['.c']),
+        'cpp': await this.findFilesRecursive(projectPath, ['.cpp', '.cc', '.cxx']),
+        'go': await this.findFilesRecursive(projectPath, ['.go']),
+        'rust': await this.findFilesRecursive(projectPath, ['.rs']),
+        'nodejs': await this.findFilesRecursive(projectPath, ['.js', '.mjs', '.cjs']),
+        'python': await this.findFilesRecursive(projectPath, ['.py'])
+      };
+
+      // Find the language with the most source files
+      let detectedLang = null;
+      let maxFiles = 0;
+
+      for (const [lang, files] of Object.entries(fileTypes)) {
+        if (files.length > maxFiles) {
+          maxFiles = files.length;
+          detectedLang = lang;
+        }
+      }
+
+      // Only return if we found a reasonable number of files
+      if (detectedLang && maxFiles > 0) {
+        console.log(chalk.gray(`📄 Detected by files: ${maxFiles} ${detectedLang} files`));
+        return detectedLang;
+      }
+
+      // Check for common project structures
+      const commonDirs = ['src', 'lib', 'include', 'source'];
+      for (const dir of commonDirs) {
+        const dirPath = path.join(projectPath, dir);
+        if (await fs.pathExists(dirPath)) {
+          // This looks like a C/C++ project with standard structure
+          const hasCFiles = (await this.findFilesRecursive(dirPath, ['.c'])).length > 0;
+          const hasCppFiles = (await this.findFilesRecursive(dirPath, ['.cpp', '.cc', '.cxx'])).length > 0;
+          
+          if (hasCFiles || hasCppFiles) {
+            return hasCppFiles ? 'cpp' : 'c';
+          }
+        }
+      }
+
+      return null;
+
+    } catch (error) {
+      console.log(chalk.red('Detection error:'), error.message);
+      return null;
+    }
   }
 
   async findFileRecursive(dir, fileName) {
     try {
       const files = await fs.readdir(dir);
       
-      // Check current directory
+      // Check current directory first
       if (files.includes(fileName)) {
         return path.join(dir, fileName);
       }
       
-      // Recursively check subdirectories
+      // Recursively check subdirectories (but skip build dirs and node_modules)
       for (const file of files) {
         const fullPath = path.join(dir, file);
-        const stat = await fs.stat(fullPath);
-        
-        if (stat.isDirectory() && !file.startsWith('.') && file !== 'node_modules' && file !== 'build') {
-          const found = await this.findFileRecursive(fullPath, fileName);
-          if (found) return found;
+        try {
+          const stat = await fs.stat(fullPath);
+          
+          if (stat.isDirectory() && 
+              !file.startsWith('.') && 
+              file !== 'node_modules' && 
+              file !== 'build' && 
+              file !== 'target') {
+            const found = await this.findFileRecursive(fullPath, fileName);
+            if (found) return found;
+          }
+        } catch (error) {
+          // Skip files we can't access
         }
       }
     } catch (error) {
-      // Directory might not be readable, skip it
+      // Directory might not be readable
     }
     
     return null;
@@ -130,8 +249,13 @@ export class DebianCompiler {
             const stat = await fs.stat(fullPath);
             
             if (stat.isDirectory()) {
-              // Skip hidden directories, node_modules, and build directories
-              if (!item.startsWith('.') && item !== 'node_modules' && item !== 'build') {
+              // Skip hidden directories and common build/output directories
+              if (!item.startsWith('.') && 
+                  item !== 'node_modules' && 
+                  item !== 'build' && 
+                  item !== 'target' &&
+                  item !== 'dist' &&
+                  item !== 'obj') {
                 await scanDirectory(fullPath);
               }
             } else if (stat.isFile()) {
@@ -283,12 +407,21 @@ export class DebianCompiler {
   getIncludeDirectories(projectPath, files) {
     const uniqueDirs = new Set();
     
-    // Add project root
+    // Add project root and common include directories
     uniqueDirs.add(projectPath);
     
     // Add directories containing source files
     files.forEach(file => {
       uniqueDirs.add(path.dirname(file));
+    });
+
+    // Add common include directories if they exist
+    const commonIncludes = ['include', 'inc', 'headers', 'src'];
+    commonIncludes.forEach(dir => {
+      const includePath = path.join(projectPath, dir);
+      if (fs.existsSync(includePath)) {
+        uniqueDirs.add(includePath);
+      }
     });
 
     // Convert to include flags
@@ -510,5 +643,26 @@ export class DebianCompiler {
     } catch (error) {
       console.log(chalk.red('Error getting system info:'), error.message);
     }
+  }
+}
+
+// If running directly
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const compiler = new DebianCompiler();
+  const command = process.argv[2] || 'build';
+  const projectPath = process.argv[3] || '.';
+
+  switch (command) {
+    case 'build':
+      await compiler.compileProject(projectPath);
+      break;
+    case 'clean':
+      await compiler.clean(projectPath);
+      break;
+    case 'info':
+      await compiler.showSystemInfo();
+      break;
+    default:
+      console.log('Usage: node compiler-debian.js [build|clean|info] [project-path]');
   }
 }
