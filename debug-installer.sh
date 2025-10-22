@@ -9,7 +9,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-REPO_URL="https://github.com/goofyshell/godev.git"
+REPO_URL="https://github.com/schoobertt/godev.git"
 INSTALL_DIR="$HOME/.godev"
 
 print_status() { echo -e "${BLUE}[GoDev]${NC} $1"; }
