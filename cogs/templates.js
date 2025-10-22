@@ -710,6 +710,21 @@ docker-compose up --build
     }]);
 
     const templatePath = path.join(this.customTemplatesDir, templateName);
+    
+    if (await fs.pathExists(templatePath)) {
+      const { overwrite } = await inquirer.prompt([{
+        type: 'confirm',
+        name: 'overwrite',
+        message: `Template '${templateName}' already exists. Overwrite?`,
+        default: false
+      }]);
+
+      if (!overwrite) {
+        console.log(chalk.yellow('Template creation cancelled.'));
+        return;
+      }
+    }
+
     await fs.ensureDir(templatePath);
 
     // Create basic template structure
@@ -724,7 +739,8 @@ This is a custom GoDev template.`,
       'template.json': `{
   "name": "${templateName}",
   "description": "Custom template",
-  "language": "custom"
+  "language": "custom",
+  "created": "${new Date().toISOString()}"
 }`
     };
 
@@ -732,10 +748,159 @@ This is a custom GoDev template.`,
       const fullPath = path.join(templatePath, filePath);
       await fs.ensureDir(path.dirname(fullPath));
       await fs.writeFile(fullPath, content);
+      console.log(chalk.blue(`   📄 Created: ${filePath}`));
     }
 
     console.log(chalk.green(`\n✅ Template '${templateName}' created!`));
     console.log(chalk.blue(`📁 Location: ${templatePath}`));
     console.log(chalk.yellow('\n💡 Edit the files in the template directory to customize it.'));
+  }
+
+  async editTemplate() {
+    const templates = await this.listTemplates();
+    
+    // Filter only custom templates (pre-configured can't be edited)
+    const customTemplates = templates.filter(t => t.type === 'custom');
+    
+    if (customTemplates.length === 0) {
+      console.log(chalk.yellow('No custom templates found.'));
+      console.log(chalk.blue('\n💡 Create your first template: godev template create'));
+      return;
+    }
+
+    const choices = customTemplates.map(template => ({
+      name: `${template.name} - ${template.description}`,
+      value: template.name
+    }));
+
+    const { templateToEdit } = await inquirer.prompt([{
+      type: 'list',
+      name: 'templateToEdit',
+      message: 'Select template to edit:',
+      choices
+    }]);
+
+    const templatePath = path.join(this.customTemplatesDir, templateToEdit);
+    
+    if (!await fs.pathExists(templatePath)) {
+      console.log(chalk.red(`Template '${templateToEdit}' not found.`));
+      return;
+    }
+
+    console.log(chalk.green(`\n📁 Editing template: ${templateToEdit}`));
+    console.log(chalk.blue(`📁 Location: ${templatePath}`));
+    
+    // Show template structure
+    const files = await this.getTemplateFiles(templatePath);
+    console.log(chalk.yellow('\n📋 Template Structure:'));
+    files.forEach(file => {
+      console.log(chalk.gray(`  📄 ${file}`));
+    });
+
+    console.log(chalk.yellow('\n💡 Edit the files directly in the template directory.'));
+    console.log(chalk.blue('   Use template variables like: {{PROJECT_NAME}}, {{PROJECT_DESCRIPTION}}, etc.'));
+    
+    // Offer to open in default editor
+    const { openEditor } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'openEditor',
+      message: 'Open template directory in default file manager?',
+      default: true
+    }]);
+
+    if (openEditor) {
+      try {
+        const { exec } = await import('child_process');
+        const platform = process.platform;
+        
+        let command;
+        if (platform === 'win32') {
+          command = `explorer "${templatePath}"`;
+        } else if (platform === 'darwin') {
+          command = `open "${templatePath}"`;
+        } else {
+          command = `xdg-open "${templatePath}"`;
+        }
+        
+        exec(command, (error) => {
+          if (error) {
+            console.log(chalk.yellow('Could not open file manager automatically.'));
+            console.log(chalk.blue('Please navigate to the directory manually.'));
+          }
+        });
+      } catch (error) {
+        console.log(chalk.yellow('Could not open file manager.'));
+        console.log(chalk.blue('Please navigate to the directory manually.'));
+      }
+    }
+  }
+
+  async getTemplateFiles(templatePath) {
+    const files = [];
+    
+    async function scanDirectory(currentPath, basePath = '') {
+      const items = await fs.readdir(currentPath);
+      
+      for (const item of items) {
+        if (item === 'template.json') continue;
+        
+        const fullPath = path.join(currentPath, item);
+        const relativePath = path.join(basePath, item);
+        const stat = await fs.stat(fullPath);
+        
+        if (stat.isDirectory()) {
+          files.push(`${relativePath}/`);
+          await scanDirectory(fullPath, relativePath);
+        } else {
+          files.push(relativePath);
+        }
+      }
+    }
+    
+    await scanDirectory(templatePath);
+    return files.sort();
+  }
+
+  async deleteTemplate() {
+    const templates = await this.listTemplates();
+    
+    // Filter only custom templates (pre-configured can't be deleted)
+    const customTemplates = templates.filter(t => t.type === 'custom');
+    
+    if (customTemplates.length === 0) {
+      console.log(chalk.yellow('No custom templates to delete.'));
+      return;
+    }
+
+    const choices = customTemplates.map(template => ({
+      name: `${template.name} - ${template.description}`,
+      value: template.name
+    }));
+
+    const { templateToDelete } = await inquirer.prompt([{
+      type: 'list',
+      name: 'templateToDelete',
+      message: 'Select template to delete:',
+      choices
+    }]);
+
+    const { confirm } = await inquirer.prompt([{
+      type: 'confirm',
+      name: 'confirm',
+      message: `Permanently delete template '${templateToDelete}'?`,
+      default: false
+    }]);
+
+    if (confirm) {
+      const templatePath = path.join(this.customTemplatesDir, templateToDelete);
+      await fs.remove(templatePath);
+      console.log(chalk.green(`✅ Template '${templateToDelete}' deleted.`));
+    } else {
+      console.log(chalk.yellow('Deletion cancelled.'));
+    }
+  }
+
+  getTemplatesDir() {
+    return this.customTemplatesDir;
   }
 }
