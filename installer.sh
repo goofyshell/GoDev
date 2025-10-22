@@ -44,6 +44,46 @@ print_divider() {
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
+# Interactive menu
+show_interactive_menu() {
+    print_banner
+    echo -e "${CYAN}GoDev Installer v$VERSION${NC}"
+    echo
+    echo -e "${YELLOW}What would you like to do?${NC}"
+    echo
+    echo -e "  ${GREEN}1${NC}  Install GoDev"
+    echo -e "  ${GREEN}2${NC}  Update GoDev" 
+    echo -e "  ${GREEN}3${NC}  Remove GoDev"
+    echo
+    echo -e "  ${YELLOW}0${NC}  Exit"
+    echo
+    
+    while true; do
+        read -p "Enter your choice [0-3]: " choice
+        case $choice in
+            1)
+                install_godev
+                break
+                ;;
+            2)
+                update_godev
+                break
+                ;;
+            3)
+                uninstall_godev
+                break
+                ;;
+            0)
+                echo -e "${YELLOW}Exiting...${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Invalid choice. Please enter 1, 2, 3, or 0.${NC}"
+                ;;
+        esac
+    done
+}
+
 ensure_path() {
     print_step "Configuring PATH..."
     
@@ -312,7 +352,7 @@ show_help() {
 
 # Main function
 main() {
-    local command=${1:-install}
+    local command=${1:-}
     
     case $command in
         install)
@@ -326,6 +366,9 @@ main() {
             ;;
         help|--help|-h)
             show_help
+            ;;
+        "")
+            show_interactive_menu
             ;;
         *)
             print_error "Unknown command: $command"
