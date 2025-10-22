@@ -17,7 +17,8 @@ export class DebianCompiler {
       'go': { compiler: 'go build', package: 'golang', extension: '.go' },
       'rust': { compiler: 'cargo build', package: 'cargo', extension: '.rs' },
       'nodejs': { compiler: 'node', package: 'nodejs', extension: '.js', runtime: true },
-      'python': { compiler: 'python3', package: 'python3', extension: '.py', runtime: true }
+      'python': { compiler: 'python3', package: 'python3', extension: '.py', runtime: true },
+      'web': { compiler: 'browser', package: '', extension: '.html', runtime: true }
     };
 
     this.buildDir = './build';
@@ -44,8 +45,10 @@ export class DebianCompiler {
       console.log(chalk.green(`📦 Detected: ${projectType} project`));
       console.log(chalk.gray(`📁 Project path: ${absoluteProjectPath}`));
 
-      // Check and install dependencies
-      await this.ensureDependencies(projectType);
+      // Check and install dependencies (skip for web projects)
+      if (projectType !== 'web') {
+        await this.ensureDependencies(projectType);
+      }
 
       // Create build directory
       const projectBuildDir = path.join(absoluteProjectPath, this.buildDir);
@@ -78,7 +81,7 @@ export class DebianCompiler {
       console.log(chalk.gray('📂 Root directory:'), files.join(', '));
       
       // Check for common source directories
-      const commonDirs = ['src', 'lib', 'include', 'source', 'headers'];
+      const commonDirs = ['src', 'lib', 'include', 'source', 'headers', 'css', 'js'];
       let foundDirs = [];
       
       for (const dir of commonDirs) {
@@ -86,7 +89,7 @@ export class DebianCompiler {
         if (await fs.pathExists(dirPath)) {
           const dirFiles = await fs.readdir(dirPath).catch(() => []);
           const sourceFiles = dirFiles.filter(file => 
-            ['.c', '.cpp', '.cc', '.cxx', '.h', '.hpp'].includes(path.extname(file).toLowerCase())
+            ['.c', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.html', '.css', '.js'].includes(path.extname(file).toLowerCase())
           );
           if (sourceFiles.length > 0) {
             foundDirs.push(`${dir}/ (${sourceFiles.length} files)`);
@@ -99,7 +102,7 @@ export class DebianCompiler {
       }
       
       // Count source files recursively
-      const allSourceFiles = await this.findFilesRecursive(projectPath, ['.c', '.cpp', '.cc', '.cxx', '.go', '.rs', '.js', '.py']);
+      const allSourceFiles = await this.findFilesRecursive(projectPath, ['.c', '.cpp', '.cc', '.cxx', '.go', '.rs', '.js', '.py', '.html', '.css']);
       console.log(chalk.gray('📄 Total source files:'), allSourceFiles.length);
       
       if (allSourceFiles.length > 0) {
@@ -135,6 +138,23 @@ export class DebianCompiler {
         }
       }
 
+      // Check for HTML/CSS/JS projects
+      const hasHtmlFiles = (await this.findFilesRecursive(projectPath, ['.html'])).length > 0;
+      const hasCssFiles = (await this.findFilesRecursive(projectPath, ['.css'])).length > 0;
+      const hasJsFiles = (await this.findFilesRecursive(projectPath, ['.js'])).length > 0;
+      
+      // If we have HTML files and this looks like a web project
+      if (hasHtmlFiles) {
+        // Check if it's a web project (has HTML + CSS/JS but no Node.js files)
+        const hasNodeModules = await fs.pathExists(path.join(projectPath, 'node_modules'));
+        const hasPackageJson = await fs.pathExists(path.join(projectPath, 'package.json'));
+        
+        if (!hasNodeModules && !hasPackageJson) {
+          console.log(chalk.gray('🌐 Detected: Web project (HTML/CSS/JS)'));
+          return 'web';
+        }
+      }
+
       // Check for C/C++ build systems
       const buildFiles = {
         'CMakeLists.txt': 'cpp',
@@ -158,7 +178,8 @@ export class DebianCompiler {
         'go': await this.findFilesRecursive(projectPath, ['.go']),
         'rust': await this.findFilesRecursive(projectPath, ['.rs']),
         'nodejs': await this.findFilesRecursive(projectPath, ['.js', '.mjs', '.cjs']),
-        'python': await this.findFilesRecursive(projectPath, ['.py'])
+        'python': await this.findFilesRecursive(projectPath, ['.py']),
+        'web': await this.findFilesRecursive(projectPath, ['.html'])
       };
 
       // Find the language with the most source files
@@ -347,6 +368,8 @@ export class DebianCompiler {
           return await this.prepareNode(projectPath);
         case 'python':
           return await this.preparePython(projectPath);
+        case 'web':
+          return await this.prepareWeb(projectPath);
         default:
           throw new Error(`Unsupported language: ${language}`);
       }
@@ -508,6 +531,29 @@ export class DebianCompiler {
     };
   }
 
+  async prepareWeb(projectPath) {
+    // Find the main HTML file
+    const htmlFiles = await this.findFilesRecursive(projectPath, ['.html']);
+    const mainHtml = htmlFiles.find(file => 
+      path.basename(file).toLowerCase().includes('index') ||
+      path.basename(file).toLowerCase().includes('main')
+    ) || htmlFiles[0];
+
+    if (!mainHtml) {
+      throw new Error('No HTML files found in web project');
+    }
+
+    console.log(chalk.blue('🌐 Web project detected'));
+    console.log(chalk.gray(`   Main file: ${path.relative(projectPath, mainHtml)}`));
+    
+    return { 
+      success: true, 
+      output: mainHtml, 
+      executable: `open "${mainHtml}"`,
+      runtime: 'browser'
+    };
+  }
+
   async findMainFile(projectPath, extension) {
     const files = await this.findFilesRecursive(projectPath, [extension]);
     
@@ -539,7 +585,8 @@ export class DebianCompiler {
       'go': '',
       'rust': '-rust',
       'nodejs': '.js',
-      'python': '.py'
+      'python': '.py',
+      'web': '.html'
     };
 
     return `${baseName}${extensions[language]}`;
@@ -547,7 +594,37 @@ export class DebianCompiler {
 
   async offerToRun(result, language) {
     try {
-      if (result.runtime) {
+      if (result.runtime === 'browser') {
+        const { run } = await inquirer.prompt([{
+          type: 'confirm',
+          name: 'run',
+          message: 'Open in web browser?',
+          default: true
+        }]);
+
+        if (run) {
+          console.log(chalk.blue('\n🌐 Opening in browser...\n'));
+          
+          const { exec } = await import('child_process');
+          const platform = process.platform;
+          
+          let command;
+          if (platform === 'win32') {
+            command = `start "" "${result.output}"`;
+          } else if (platform === 'darwin') {
+            command = `open "${result.output}"`;
+          } else {
+            command = `xdg-open "${result.output}"`;
+          }
+          
+          exec(command, (error) => {
+            if (error) {
+              console.log(chalk.yellow('Could not open browser automatically.'));
+              console.log(chalk.blue(`Please open manually: ${result.output}`));
+            }
+          });
+        }
+      } else if (result.runtime) {
         const { run } = await inquirer.prompt([{
           type: 'confirm',
           name: 'run',
