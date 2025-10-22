@@ -1,0 +1,56 @@
+{
+  "templates": {
+    "nodejs": {
+      "name": "Node.js API",
+      "description": "Express.js API with ESLint and testing",
+      "files": [
+        "package.json",
+        "src/index.js",
+        ".eslintrc.json",
+        "README.md"
+      ],
+      "dependencies": ["express", "cors", "helmet"],
+      "devDependencies": ["nodemon", "eslint", "jest"],
+      "scripts": {
+        "start": "node src/index.js",
+        "dev": "nodemon src/index.js",
+        "test": "jest"
+      }
+    },
+    "react": {
+      "name": "React App",
+      "description": "React application with Vite and Tailwind",
+      "files": [
+        "package.json",
+        "src/main.jsx",
+        "tailwind.config.js",
+        "vite.config.js"
+      ],
+      "dependencies": ["react", "react-dom"],
+      "devDependencies": ["vite", "tailwindcss", "autoprefixer"],
+      "scripts": {
+        "dev": "vite",
+        "build": "vite build"
+      }
+    },
+    "python": {
+      "name": "Python Project",
+      "description": "Python project with virtual environment",
+      "files": [
+        "requirements.txt",
+        "src/main.py",
+        ".python-version",
+        "README.md"
+      ]
+    },
+    "go": {
+      "name": "Go CLI",
+      "description": "Go command-line application",
+      "files": [
+        "go.mod",
+        "main.go",
+        "README.md"
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "defaults": {
+    "author": "schoobertt",
+    "license": "MIT",
+    "version": "1.0.0",
+    "gitInit": true,
+    "installDeps": true
+  },
+  "paths": {
+    "templates": "./templates",
+    "projects": "./projects"
+  }
+}

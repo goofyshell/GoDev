@@ -1,0 +1,21 @@
+{
+  "name": "godev",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "godev": "./godev.js",
+    "godev-compile": "./compiler-cli.js"
+  },
+  "scripts": {
+    "start": "node godev.js",
+    "compile": "node compiler-cli.js build",
+    "compile:clean": "node compiler-cli.js clean",
+    "compile:info": "node compiler-cli.js info"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "inquirer": "^9.2.12",
+    "fs-extra": "^11.2.0",
+    "commander": "^12.0.0"
+  }
+}
