@@ -40,10 +40,10 @@ npm install express cors helmet
 
 <h2>🚀 Quick Install</h2>
 <p><strong>One-command installation (Linux/macOS):</strong></p>
-<pre><code>curl -fsSL https://raw.githubusercontent.com/shcoobertt/godev/main/installer.sh | bash</code></pre>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/schoobertt/godev/main/installer.sh | bash</code></pre>
 
 <p><strong>Manual installation:</strong></p>
-<pre><code>git clone https://github.com/shcoobertt/godev.git
+<pre><code>git clone https://github.com/schoobertt/godev.git
 cd godev
 ./installer.sh install</code></pre>
 
