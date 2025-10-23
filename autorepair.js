@@ -10,7 +10,7 @@ const GITHUB_USER = 'schoobertt';
 const REPO = 'GoDev';
 const CRITICAL_FILES = ['compiler-debian.js', 'godev.js'];
 
-async function repair() {
+export default async function autorepair() {
   console.log(chalk.blue('🔧 GoDev Auto Repair\n'));
 
   const projectRoot = path.resolve('.');
@@ -68,5 +68,3 @@ async function repair() {
 
   console.log(chalk.green('\n✅ Critical files are present. GoDev source restored.'));
 }
-
-repair();
