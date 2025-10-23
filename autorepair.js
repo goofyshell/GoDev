@@ -8,7 +8,14 @@ import chalk from 'chalk';
 
 const GITHUB_USER = 'schoobertt';
 const REPO = 'GoDev';
-const CRITICAL_FILES = ['compiler-debian.js', 'godev.js'];
+const CRITICAL_FILES = [
+  'compiler-debian.js',
+  'godev.js',
+  'cogs/init.js',
+  'cogs/templates.js',
+  'cogs/git.js',
+  'cogs/dependencies.js'
+];
 
 export default async function autorepair() {
   console.log(chalk.blue('🔧 GoDev Auto Repair\n'));
