@@ -6,6 +6,7 @@ import { InitCog } from './cogs/init.js';
 import { TemplatesCog } from './cogs/templates.js';
 import { GitCog } from './cogs/git.js';
 import { DependenciesCog } from './cogs/dependencies.js';
+import autorepair from './autorepair.js';
 
 import config from './config/templates.json' assert { type: 'json' };
 import settings from './config/settings.json' assert { type: 'json' };
@@ -157,6 +158,14 @@ program
     } else {
       console.log(chalk.yellow('📁 Directory does not exist yet'));
     }
+  });
+
+program
+  .command('repair')
+  .description('Run GoDev Auto Repair to restore critical source files')
+  .action(async () => {
+    console.log(chalk.blue('\n🔧 Running GoDev Auto Repair...\n'));
+    await autorepair();
   });
 
 program.parse();
