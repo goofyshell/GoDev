@@ -303,7 +303,7 @@ update_godev() {
     if [ ! -d "$INSTALL_DIR" ]; then
         print_error "GoDev is not installed. Please install first."
         echo
-        echo "Run: curl -fsSL https://raw.githubusercontent.com/goofyshell/godev/main/installer.sh | bash"
+        echo "Run: curl -fsSL https://raw.githubusercontent.com/schoobertt/godev/main/installer.sh | bash"
         exit 1
     fi
     
@@ -385,7 +385,7 @@ show_help() {
     echo -e "${CYAN}GoDev Installer v$VERSION${NC}"
     echo
     echo -e "${YELLOW}Usage:${NC}"
-    echo "  curl -fsSL https://raw.githubusercontent.com/goofyshell/godev/main/installer.sh | bash"
+    echo "  curl -fsSL https://raw.githubusercontent.com/schoobertt/godev/main/installer.sh | bash"
     echo "  curl -fsSL ... | bash -s install    (default in pipe)"
     echo "  curl -fsSL ... | bash -s update"
     echo "  curl -fsSL ... | bash -s uninstall"
