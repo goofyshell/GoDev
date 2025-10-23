@@ -8,8 +8,11 @@ import { GitCog } from './cogs/git.js';
 import { DependenciesCog } from './cogs/dependencies.js';
 import autorepair from './autorepair.js';
 
-import config from './config/templates.json' assert { type: 'json' };
-import settings from './config/settings.json' assert { type: 'json' };
+import fs from 'fs-extra';
+
+const config = fs.readJsonSync(new URL('./config/templates.json', import.meta.url));
+const settings = fs.readJsonSync(new URL('./config/settings.json', import.meta.url));
+
 
 const program = new Command();
 
