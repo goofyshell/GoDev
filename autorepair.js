@@ -13,7 +13,7 @@ const CRITICAL_FILES = ['compiler-debian.js', 'godev.js'];
 export default async function autorepair() {
   console.log(chalk.blue('🔧 GoDev Auto Repair\n'));
 
-  const projectRoot = path.resolve('.');
+const projectRoot = path.join(process.env.HOME || process.env.USERPROFILE, '.godev');
   
   // Check critical files
   let missingFiles = [];
