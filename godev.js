@@ -1,27 +1,50 @@
 #!/usr/bin/env node
 
-import { Command } from 'commander';
-import chalk from 'chalk';
-import { InitCog } from './cogs/init.js';
-import { TemplatesCog } from './cogs/templates.js';
-import { GitCog } from './cogs/git.js';
-import { DependenciesCog } from './cogs/dependencies.js';
-import autorepair from './autorepair.js';
-
 import fs from 'fs-extra';
+import path from 'path';
+import chalk from 'chalk';
+import { Command } from 'commander';
 
+const projectRoot = path.join(process.env.HOME || process.env.USERPROFILE, '.godev');
+const autorepairPath = path.join(projectRoot, 'autorepair.js');
+
+// --- Fallback for missing cogs ---
+let InitCog, TemplatesCog, GitCog, DependenciesCog;
+
+try {
+  ({ InitCog } = await import('./cogs/init.js'));
+  ({ TemplatesCog } = await import('./cogs/templates.js'));
+  ({ GitCog } = await import('./cogs/git.js'));
+  ({ DependenciesCog } = await import('./cogs/dependencies.js'));
+} catch (err) {
+  console.log(chalk.red('❌ GoDev core modules missing or corrupted.'));
+  console.log(chalk.yellow('Attempting automatic repair...\n'));
+
+  try {
+    const { default: autorepair } = await import(`file://${autorepairPath}`);
+    await autorepair();
+    console.log(chalk.green('\n✅ GoDev repaired. Please re-run your command.'));
+  } catch (repairErr) {
+    console.error(chalk.red(`\nAuto-repair failed: ${repairErr.message}`));
+    console.error(chalk.red('Please reinstall GoDev manually.'));
+  }
+  process.exit(0);
+}
+
+// --- Load configs safely ---
 const config = fs.readJsonSync(new URL('./config/templates.json', import.meta.url));
 const settings = fs.readJsonSync(new URL('./config/settings.json', import.meta.url));
 
-
+// --- Commander Setup ---
 const program = new Command();
-
 program
   .name('godev')
   .description('🚀 GoDev - Project initialization tool')
   .version('1.0.0');
 
-// Create project command
+// --------------------
+// Create project
+// --------------------
 program
   .command('create')
   .description('Create a new project from a template')
@@ -30,25 +53,18 @@ program
     try {
       const initCog = new InitCog();
       const templatesCog = new TemplatesCog();
-      
-      // Get all available templates
+
       const allTemplates = await templatesCog.listTemplates();
-      
-      // Get project details
       const projectData = await initCog.createProject(allTemplates, options.template);
-      
-      // Generate template
       await templatesCog.generateTemplate(projectData, projectData.template);
-      
+
       const projectPath = `${process.cwd()}/${projectData.projectName}`;
 
-      // Initialize Git if requested
       if (projectData.gitInit) {
         const gitCog = new GitCog();
         await gitCog.initializeRepo(projectPath);
       }
 
-      // Install dependencies if requested
       if (projectData.installDeps) {
         const depsCog = new DependenciesCog();
         await depsCog.installDependencies(projectPath, projectData.template);
@@ -57,11 +73,7 @@ program
       console.log(chalk.green.bold('\n🎉 Project created successfully!'));
       console.log(chalk.blue(`\nNext steps:`));
       console.log(`cd ${projectData.projectName}`);
-      
-      if (projectData.template.includes('node') && !projectData.installDeps) {
-        console.log('npm install');
-      }
-      
+      if (projectData.template.includes('node') && !projectData.installDeps) console.log('npm install');
       console.log('Start coding! 🚀\n');
 
     } catch (error) {
@@ -70,9 +82,10 @@ program
     }
   });
 
-// Template management commands
-const templateCommand = new Command('template')
-  .description('Manage custom templates');
+// --------------------
+// Template management
+// --------------------
+const templateCommand = new Command('template').description('Manage custom templates');
 
 templateCommand
   .command('create')
@@ -88,18 +101,15 @@ templateCommand
   .action(async () => {
     const templatesCog = new TemplatesCog();
     const templates = await templatesCog.listTemplates();
-    
     if (templates.length === 0) {
       console.log(chalk.yellow('No templates found.'));
       console.log(chalk.blue('\n💡 Create your first template: godev template create'));
       return;
     }
-    
     console.log(chalk.blue.bold('\n📋 Available Templates:\n'));
     templates.forEach(template => {
       console.log(`  ${chalk.green(template.name.padEnd(20))} ${chalk.cyan('(' + template.language + ')')}`);
-      console.log(`  ${chalk.gray('└─ ' + template.description)}`);
-      console.log();
+      console.log(`  ${chalk.gray('└─ ' + template.description)}\n`);
     });
   });
 
@@ -119,34 +129,33 @@ templateCommand
     await templatesCog.editTemplate();
   });
 
-// Add the template command to main program
 program.addCommand(templateCommand);
 
-// Show templates command (alias for template list)
+// --------------------
+// Templates alias
+// --------------------
 program
   .command('templates')
   .description('List all available templates (alias for template list)')
   .action(async () => {
     const templatesCog = new TemplatesCog();
     const templates = await templatesCog.listTemplates();
-    
     if (templates.length === 0) {
       console.log(chalk.yellow('No templates found.'));
       console.log(chalk.blue('\n💡 Create your first template: godev template create'));
       return;
     }
-    
     console.log(chalk.blue.bold('\n📋 Available Templates:\n'));
     templates.forEach(template => {
       console.log(`  ${chalk.green(template.name.padEnd(20))} ${chalk.cyan('(' + template.language + ')')}`);
-      console.log(`  ${chalk.gray('└─ ' + template.description)}`);
-      console.log();
+      console.log(`  ${chalk.gray('└─ ' + template.description)}\n`);
     });
-    
     console.log(chalk.yellow('💡 Use "godev template --help" for template management commands'));
   });
 
-// Show template directory location
+// --------------------
+// Template directory
+// --------------------
 program
   .command('template-dir')
   .description('Show the templates directory location')
@@ -154,7 +163,6 @@ program
     const templatesCog = new TemplatesCog();
     const templatesDir = templatesCog.getTemplatesDir();
     console.log(chalk.blue('📁 Templates directory:'), templatesDir);
-    
     if (await fs.pathExists(templatesDir)) {
       const templates = await templatesCog.listTemplates();
       console.log(chalk.green(`📋 Found ${templates.length} templates`));
@@ -163,12 +171,19 @@ program
     }
   });
 
+// --------------------
+// Repair command
+// --------------------
 program
   .command('repair')
   .description('Run GoDev Auto Repair to restore critical source files')
   .action(async () => {
     console.log(chalk.blue('\n🔧 Running GoDev Auto Repair...\n'));
+    const { default: autorepair } = await import(`file://${autorepairPath}`);
     await autorepair();
   });
 
+// --------------------
+// Parse commands
+// --------------------
 program.parse();
