@@ -5,7 +5,7 @@ import path from 'path';
 import { exec } from 'child_process';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
-import fetch from 'node-fetch'; // <-- Required for fetch() in Node.js
+const res = await fetch(url);
 
 const GITHUB_USER = 'schoobertt';
 const REPO = 'GoDev';
